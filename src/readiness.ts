@@ -61,3 +61,30 @@ export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expec
 }
 
 export const collectCompletion = (page: Page): Promise<Observation> => page.evaluate(() => (window as typeof window & { completionSample: Promise<Observation> }).completionSample)
+
+export async function closeCompletions(page: Page, editor: 'lvce' | 'vscode'): Promise<void> {
+  const rows = completionUi(editor).rows
+  await page.keyboard.press('Escape')
+  if (await page.evaluate((rows) => [...document.querySelectorAll(rows)].some((row) => row.getClientRects().length), rows)) await page.keyboard.press('Control+Space')
+  await page.waitForFunction((rows) => ![...document.querySelectorAll(rows)].some((row) => row.getClientRects().length), rows)
+}
+
+// The first request can arrive before a language provider registers. Retry only
+// discarded readiness requests; a measured interaction is never retried.
+export async function warmCompletion(page: Page, editor: 'lvce' | 'vscode', expected: string, timeoutMs = 30000, requestTimeoutMs = 3000): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  let requests = 0
+  while (Date.now() < deadline) {
+    await closeCompletions(page, editor)
+    await armCompletion(page, editor, expected, 'Space', undefined, { timeoutMs: Math.min(requestTimeoutMs, Math.max(1, deadline - Date.now())) })
+    await page.keyboard.press('Control+Space')
+    requests++
+    try {
+      await collectCompletion(page)
+      return requests
+    } catch (error) {
+      if (!String(error).includes('Completion timeout:')) throw error
+    }
+  }
+  throw new Error(`Provider warmup failed after ${requests} discarded requests: ${expected}`)
+}

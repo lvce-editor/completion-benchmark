@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import { summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
-import { armCompletion, collectCompletion, completionUi } from './readiness.ts'
+import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode'
 type Language = 'html' | 'typescript'
@@ -21,6 +21,7 @@ interface Trial {
   render: ReturnType<typeof summarizeInteractionTrace> | null
   screenshot: string | null
   trace: string | null
+  warmupRequests?: number
   observations?: { opening: { row: string; highlight: string }; filtering: { row: string; highlight: string } }
   error?: string
 }
@@ -77,7 +78,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     await cp(join('.tmp/apps/typescript-extension'), extension, { recursive: true })
     args.push(workspace, file)
   } else {
-    args.push('--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--new-window', workspace, file)
+    args.push(`--extensions-dir=${join(root, 'extensions')}`, '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--new-window', workspace, file)
   }
   const child = spawn(binary, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''
@@ -154,6 +155,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
   let page: Page | undefined
   let session: CDPSession | undefined
   const events: TraceEvent[] = []
+  let stage = 'launch'
   try {
     app = await launch(editor, language, prefix)
     page = app.page
@@ -162,21 +164,20 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
     const filterKey = language === 'html' ? 'h' : 'a'
     const filterCode = language === 'html' ? 'KeyH' : 'KeyA'
     await page.keyboard.press('Control+End')
-    await armCompletion(page, editor, expected, 'Space')
-    await page.keyboard.press('Control+Space')
-    await collectCompletion(page)
-    await page.keyboard.press('Escape')
-    if (await page.locator(completionUi(editor).rows).first().isVisible()) await page.keyboard.press('Control+Space')
-    await page.waitForFunction((rows) => ![...document.querySelectorAll(rows)].some((row) => row.getClientRects().length), completionUi(editor).rows)
+    stage = 'warmup'
+    const warmupRequests = await warmCompletion(page, editor, expected)
+    await closeCompletions(page, editor)
     if (traced) {
       session = await page.context().newCDPSession(page)
       session.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => events.push(...data.value))
       await session.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' })
     }
+    stage = 'opening'
     await armCompletion(page, editor, expected, 'Space', undefined, { traceMarkers: traced })
     await page.keyboard.press('Control+Space')
     const opening = await collectCompletion(page)
     const openingMs = opening.milliseconds
+    stage = 'filtering'
     await armCompletion(page, editor, filteredExpected, filterCode, language === 'html' ? 'h' : 'Arra', { traceMarkers: traced })
     await page.keyboard.press(filterKey)
     const filtering = await collectCompletion(page)
@@ -184,6 +185,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
     if (openingMs === undefined || filteringMs === undefined) throw new Error('A timed completion interaction did not include its trusted keydown timestamp')
     let render = null
     let trace: string | null = null
+    stage = 'trace summary'
     if (traced && session) {
       const completed = new Promise<void>((resolve) => session!.once('Tracing.tracingComplete', () => resolve()))
       await session.send('Tracing.end')
@@ -194,7 +196,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
     }
     const screenshot = `${editor}-${language}-${repeat + 1}-${traced ? 'render' : 'latency'}.png`
     await page.screenshot({ path: join(output, screenshot) })
-    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'passed', openingMs, filteringMs, observations: { opening, filtering }, render, screenshot, trace }
+    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'passed', warmupRequests, openingMs, filteringMs, observations: { opening, filtering }, render, screenshot, trace }
   } catch (error) {
     if (page) {
       const evidence = await page.evaluate(() => ({
@@ -204,10 +206,10 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
         activeElement: document.activeElement?.outerHTML.slice(0, 500),
         completionRows: [...document.querySelectorAll('.EditorCompletionItem, .suggest-widget .monaco-list-row')].slice(0, 30).map((node) => ({ text: node.textContent, visible: Boolean(node.getClientRects().length), html: node.outerHTML.slice(0, 500) })),
       })).catch(() => ({ title: '', url: '', body: '', activeElement: '', completionRows: [] }))
-      await writeFile(`${prefix}-failure.json`, JSON.stringify({ error: String(error), evidence }, null, 2)).catch(() => {})
+      await writeFile(`${prefix}-failure.json`, JSON.stringify({ stage, error: String(error), evidence }, null, 2)).catch(() => {})
       await page.screenshot({ path: `${prefix}-failure.png` }).catch(() => {})
     }
-    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'failed', openingMs: null, filteringMs: null, render: null, screenshot: null, trace: null, error: String(error) }
+    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'failed', openingMs: null, filteringMs: null, render: null, screenshot: null, trace: null, error: `${stage}: ${String(error)}` }
   } finally {
     await session?.detach().catch(() => {})
     await app?.close().catch(() => {})

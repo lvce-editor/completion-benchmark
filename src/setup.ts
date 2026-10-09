@@ -76,7 +76,7 @@ const metadata = {
   platform: process.platform, architecture: process.arch, node: process.version,
   host: { cpu: cpus()[0]?.model, cpuCount: cpus().length, memoryBytes: totalmem(), kernel: release() },
   run: { timestamp: new Date().toISOString(), commit: process.env.GITHUB_SHA ?? null, id: process.env.GITHUB_RUN_ID ?? null },
-  measurement: { viewport: { width: 1280, height: 900 }, gpu: false, warmup: 1, endpoint: 'query-qualified DOM through two animation frames', filtering: 'live open-list update including provider work', vscodeQuickSuggestions: false },
+  measurement: { viewport: { width: 1280, height: 900 }, gpu: false, warmup: 'successful discarded request; bounded startup readiness retries', endpoint: 'query-qualified DOM through two animation frames', filtering: 'live open-list update including provider work', vscodeQuickSuggestions: false },
   lvce: { version: lvce.version, binary: lvceBinary, sha256: lvce.sha256, htmlProvider: 'bundled with LVCE release', typescriptProvider: tsManifest.version, typescriptProviderSha256: ts.sha256, completionsOnType: true },
   vscode: { version: vscodeManifest.version, binary: join(vscodeRoot, vscode.binary), sha256: vscode.sha256, htmlProvider: vscodeHtml.version, typescriptProvider: vscodeTs.version },
   fixtures: {

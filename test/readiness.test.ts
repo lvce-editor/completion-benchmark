@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { chromium } from 'playwright'
-import { armCompletion, collectCompletion } from '../src/readiness.ts'
+import { armCompletion, collectCompletion, warmCompletion } from '../src/readiness.ts'
 
 test('renderer observation rejects stale rows and observes trusted keys through two frames', async () => {
   const browser = await chromium.launch()
@@ -34,4 +34,27 @@ test('renderer observation rejects stale rows and observes trusted keys through 
   } finally {
     await browser.close()
   }
+})
+
+
+test('warmup waits for provider registration without retrying a measured interaction', async () => {
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent('<div class="EditorInput"><textarea></textarea></div>')
+    await page.locator('textarea').focus()
+    await page.evaluate(() => {
+      let requests = 0
+      document.addEventListener('keydown', (event) => {
+        if (event.code !== 'Space' || !event.ctrlKey) return
+        if (++requests === 2) {
+          const row = document.createElement('div')
+          row.className = 'EditorCompletionItem'
+          row.textContent = 'Array'
+          document.body.append(row)
+        }
+      })
+    })
+    assert.equal(await warmCompletion(page, 'lvce', 'Array', 2000, 100), 2)
+  } finally { await browser.close() }
 })
