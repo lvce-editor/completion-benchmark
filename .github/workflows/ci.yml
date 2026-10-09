@@ -1,0 +1,92 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: completion-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+  benchmark:
+    name: Benchmark (${{ matrix.editor }}, ${{ matrix.language }})
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        editor: [lvce, vscode]
+        language: [html, typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1
+      - run: npm run setup
+      - name: Measure completions
+        run: xvfb-run -a npm run benchmark -- --editor ${{ matrix.editor }} --language ${{ matrix.language }} --repeats ${{ github.event_name == 'pull_request' && '1' || '5' }} --output results/${{ matrix.editor }}-${{ matrix.language }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: completion-results-${{ matrix.editor }}-${{ matrix.language }}
+          path: results/${{ matrix.editor }}-${{ matrix.language }}
+  report:
+    name: Combined benchmark report
+    needs: benchmark
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: completion-results-*
+          path: results/editors
+      - run: npm run report -- --input results/editors
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completion-benchmark-report
+          path: site/
+          if-no-files-found: error
+  deploy:
+    name: Deploy Pages
+    if: github.ref == 'refs/heads/main'
+    needs: report
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

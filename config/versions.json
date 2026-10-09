@@ -1,0 +1,22 @@
+{
+  "lvce": {
+    "version": "v0.120.7",
+    "asset": "lvce-v0.120.7_amd64.deb",
+    "url": "https://github.com/lvce-editor/lvce-editor/releases/download/v0.120.7/lvce-v0.120.7_amd64.deb",
+    "sha256": "961e4c2d0592857310d9aab1782a1dc1807443567f719dba4c07029125330ca1",
+    "binary": "usr/lib/lvce/lvce",
+    "typescriptExtension": {
+      "version": "v5.25.3",
+      "asset": "language-features-typescript-v5.25.3.tar.br",
+      "url": "https://github.com/lvce-editor/language-features-typescript/releases/download/v5.25.3/language-features-typescript-v5.25.3.tar.br",
+      "sha256": "10024d377313f2b811ab1242f387e57ea46ff3dc0a69dbeba4ac1f842557b097"
+    }
+  },
+  "vscode": {
+    "version": "1.136.2",
+    "asset": "vscode.tar.gz",
+    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/88e44fa0e00b08f7758b4f6d05632e4fd5e4df6f/code-stable-x64-1788561485.tar.gz",
+    "sha256": "2bab551c3677d33010e317a7845e61d2f0fa0c80f8518399c42e0f941f64f18f",
+    "binary": "VSCode-linux-x64/code"
+  }
+}
