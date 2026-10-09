@@ -13,10 +13,10 @@
     }
   },
   "vscode": {
-    "version": "1.136.2",
-    "asset": "vscode.tar.gz",
-    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/88e44fa0e00b08f7758b4f6d05632e4fd5e4df6f/code-stable-x64-1788561485.tar.gz",
-    "sha256": "2bab551c3677d33010e317a7845e61d2f0fa0c80f8518399c42e0f941f64f18f",
+    "version": "1.141.0",
+    "asset": "vscode-1.141.0.tar.gz",
+    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/2a59476c9bfcb90b3ddc372c36762471b7dfad1c/code-stable-x64-1791276637.tar.gz",
+    "sha256": "d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a",
     "binary": "VSCode-linux-x64/code"
   }
 }
