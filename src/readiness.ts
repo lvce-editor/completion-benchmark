@@ -11,8 +11,8 @@ export interface Observation {
   highlight: string
 }
 
-export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expected: string, code: string, highlight?: string, timeoutMs = 30000): Promise<void> {
-  await page.evaluate(({ selectors, expected, code, highlight, timeoutMs }) => {
+export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expected: string, code: string, highlight?: string, options: { timeoutMs?: number; traceMarkers?: boolean } = {}): Promise<void> {
+  await page.evaluate(({ selectors, expected, code, highlight, timeoutMs, traceMarkers }) => {
     type Host = typeof window & { completionSample?: Promise<{ milliseconds: number; row: string; highlight: string }>; cancelCompletionSample?: () => void }
     const host = window as Host
     host.cancelCompletionSample?.()
@@ -30,7 +30,10 @@ export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expec
       host.cancelCompletionSample = cancel
       const timer = setTimeout(() => { clean(); reject(new Error(`Completion timeout: ${expected}, query ${highlight ?? '(opening)'}, trusted key ${start === undefined ? 'missing' : 'observed'}`)) }, timeoutMs)
       const keydown = (event: KeyboardEvent) => {
-        if (event.isTrusted && event.code === code && (code !== 'Space' || event.ctrlKey) && start === undefined) start = performance.now()
+        if (event.isTrusted && event.code === code && (code !== 'Space' || event.ctrlKey) && start === undefined) {
+          start = performance.now()
+          if (traceMarkers && code === 'Space') console.timeStamp('completion-benchmark:start')
+        }
       }
       document.addEventListener('keydown', keydown, true)
       const visible = (node: Element) => Boolean(node.getClientRects().length)
@@ -46,6 +49,7 @@ export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expec
         consecutive = start !== undefined && focused && row ? consecutive + 1 : 0
         if (consecutive >= 2 && row) {
           const observation = { milliseconds: performance.now() - start!, row: row.textContent ?? '', highlight: [...row.querySelectorAll(selectors.highlights)].filter(visible).map((node) => node.textContent ?? '').join('') }
+          if (traceMarkers && highlight) console.timeStamp('completion-benchmark:end')
           clean()
           resolve(observation)
         } else frame = requestAnimationFrame(tick)
@@ -53,7 +57,7 @@ export async function armCompletion(page: Page, editor: 'lvce' | 'vscode', expec
       frame = requestAnimationFrame(tick)
     })
     host.completionSample.catch(() => {})
-  }, { selectors: completionUi(editor), expected, code, highlight, timeoutMs })
+  }, { selectors: completionUi(editor), expected, code, highlight, timeoutMs: options.timeoutMs ?? 30000, traceMarkers: options.traceMarkers ?? false })
 }
 
 export const collectCompletion = (page: Page): Promise<Observation> => page.evaluate(() => (window as typeof window & { completionSample: Promise<Observation> }).completionSample)

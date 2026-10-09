@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { quantile, summarizeTrace } from '../src/metrics.ts'
+import { quantile, summarizeTrace, summarizeInteractionTrace } from '../src/metrics.ts'
 
 test('summarizes Chromium paint and CSS recalculation count and duration', () => {
   assert.deepEqual(summarizeTrace([
@@ -21,4 +21,20 @@ test('reports nearest-rank median and p95', () => {
   assert.equal(quantile([9, 1, 3, 7, 5], 0.5), 5)
   assert.equal(quantile([9, 1, 3, 7, 5], 0.95), 9)
   assert.throws(() => quantile([], 0.5), /empty sample/)
+})
+
+const marker = (message: string, ts: number) => ({ name: 'TimeStamp', ts, args: { data: { message } } })
+
+test('interaction markers exclude incomplete capture-tail work but retain strict in-window evidence', () => {
+  const events = [
+    marker('completion-benchmark:start', 1000),
+    { name: 'Paint', ph: 'X', ts: 1100, dur: 300 },
+    { name: 'UpdateLayoutTree', ph: 'X', ts: 1400, dur: 700 },
+    marker('completion-benchmark:end', 2000),
+    { name: 'UpdateLayoutTree', ph: 'B', ts: 2200 },
+  ]
+  assert.deepEqual(summarizeInteractionTrace(events), { paintCount: 1, paintDurationMs: 0.3, styleRecalculationCount: 1, styleRecalculationDurationMs: 0.6 })
+  assert.throws(() => summarizeInteractionTrace([...events, { name: 'Paint', ph: 'B', ts: 1500 }]), /Incomplete rendering event/)
+  assert.throws(() => summarizeInteractionTrace(events.slice(1)), /exactly one/)
+  assert.throws(() => summarizeInteractionTrace(events.filter((event) => event.name !== 'Paint')), /no Paint events/)
 })

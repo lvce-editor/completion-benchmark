@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
-import { summarizeTrace, type TraceEvent } from './metrics.ts'
+import { summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode'
@@ -18,7 +18,7 @@ interface Trial {
   status: 'passed' | 'failed'
   openingMs: number | null
   filteringMs: number | null
-  render: ReturnType<typeof summarizeTrace> | null
+  render: ReturnType<typeof summarizeInteractionTrace> | null
   screenshot: string | null
   trace: string | null
   observations?: { opening: { row: string; highlight: string }; filtering: { row: string; highlight: string } }
@@ -173,11 +173,11 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
       session.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => events.push(...data.value))
       await session.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' })
     }
-    await armCompletion(page, editor, expected, 'Space')
+    await armCompletion(page, editor, expected, 'Space', undefined, { traceMarkers: traced })
     await page.keyboard.press('Control+Space')
     const opening = await collectCompletion(page)
     const openingMs = opening.milliseconds
-    await armCompletion(page, editor, filteredExpected, filterCode, language === 'html' ? 'h' : 'Arra')
+    await armCompletion(page, editor, filteredExpected, filterCode, language === 'html' ? 'h' : 'Arra', { traceMarkers: traced })
     await page.keyboard.press(filterKey)
     const filtering = await collectCompletion(page)
     const filteringMs = filtering.milliseconds
@@ -190,7 +190,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
       await completed
       trace = `${editor}-${language}-${repeat + 1}.trace.json`
       await writeFile(join(output, trace), JSON.stringify(events))
-      render = summarizeTrace(events)
+      render = summarizeInteractionTrace(events)
     }
     const screenshot = `${editor}-${language}-${repeat + 1}-${traced ? 'render' : 'latency'}.png`
     await page.screenshot({ path: join(output, screenshot) })

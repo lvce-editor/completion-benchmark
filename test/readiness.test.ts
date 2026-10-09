@@ -9,7 +9,7 @@ test('renderer observation rejects stale rows and observes trusted keys through 
     const page = await browser.newPage()
     await page.setContent('<div class="EditorInput"><textarea></textarea></div><div class="EditorCompletionItem">Array<span class="EditorCompletionItemHighlight">Arr</span></div>')
     await page.locator('textarea').focus()
-    await armCompletion(page, 'lvce', 'Array', 'KeyA', 'Arra', 1000)
+    await armCompletion(page, 'lvce', 'Array', 'KeyA', 'Arra', { timeoutMs: 1000 })
     await page.keyboard.press('a')
     const sample = collectCompletion(page)
     let settled = false
@@ -23,12 +23,12 @@ test('renderer observation rejects stale rows and observes trusted keys through 
     assert.ok(result.milliseconds > 0)
     assert.equal(await page.evaluate(() => Boolean((window as typeof window & { cancelCompletionSample?: unknown }).cancelCompletionSample)), false)
 
-    await armCompletion(page, 'lvce', 'Array', 'Space', undefined, 100)
+    await armCompletion(page, 'lvce', 'Array', 'Space', undefined, { timeoutMs: 100 })
     await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', ctrlKey: true })))
     await assert.rejects(collectCompletion(page), /trusted key missing/)
     assert.equal(await page.evaluate(() => Boolean((window as typeof window & { cancelCompletionSample?: unknown }).cancelCompletionSample)), false)
 
-    await armCompletion(page, 'lvce', 'Array', 'Space', undefined, 1000)
+    await armCompletion(page, 'lvce', 'Array', 'Space', undefined, { timeoutMs: 1000 })
     await page.keyboard.press('Control+Space')
     assert.ok((await collectCompletion(page)).milliseconds > 0)
   } finally {
