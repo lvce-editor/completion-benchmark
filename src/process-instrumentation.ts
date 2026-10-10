@@ -17,7 +17,7 @@ const instrument = (original) => function(file, args, options = {}) {
 childProcess.fork = instrument(childProcess.fork);
 if (process.type === 'browser' && process.env.COMPLETION_BENCHMARK_LEGACY_ELECTRON !== '1') {
   const electron = require('electron');
-  if (typeof electron.utilityProcess?.fork !== 'function') throw new Error('Electron utilityProcess.fork is unavailable');
+  if (!electron.utilityProcess || typeof electron.utilityProcess.fork !== 'function') throw new Error('Electron utilityProcess.fork is unavailable');
   const utilityFork = instrument(electron.utilityProcess.fork);
   electron.utilityProcess.fork = function(file, args, options = {}) {
     if (!Array.isArray(args)) { options = args || {}; args = undefined; }
@@ -31,7 +31,8 @@ if (process.type === 'browser' && process.env.COMPLETION_BENCHMARK_LEGACY_ELECTR
 export interface InspectorProcess { pid: number; parentPid: number; argv: string[]; role: string; url: string }
 
 // Atom's BufferedNodeProcess spawns Electron in Node mode from the renderer.
-// Instrument those children before provider activation without opening a Node
+// apm uses a shell wrapper and a separate bundled Node binary. Instrument
+// those children before provider activation without opening a Node
 // inspector in the Chromium renderer itself.
 export const atomRendererInstrumentation = String.raw`
 const childProcess = require('child_process');
@@ -40,6 +41,11 @@ const spawn = childProcess.spawn;
 childProcess.spawn = function(file, args, options = {}) {
   if (file === process.execPath && (options.env || process.env).ELECTRON_RUN_AS_NODE) {
     args = ['--inspect=0', '--require=' + path.join(__dirname, 'process-instrumentation.cjs'), ...args];
+  }
+  if (path.basename(file) === 'apm') {
+    const preload = path.join(__dirname, 'process-instrumentation.cjs');
+    const env = options.env || process.env;
+    options = { ...options, env: { ...env, NODE_OPTIONS: [env.NODE_OPTIONS, '--require=' + JSON.stringify(preload)].filter(Boolean).join(' ') } };
   }
   return spawn.call(this, file, args, options);
 };
