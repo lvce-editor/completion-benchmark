@@ -8,7 +8,10 @@ import test from 'node:test'
 test('report separates HTML and TypeScript comparisons, with visible failures and no synthetic zero samples', async () => {
   const root = await mkdtemp(join(tmpdir(), 'completion-report-test-'))
   try {
-    await writeFile(join(root, 'results.json'), JSON.stringify({ metadata: { lvce: { version: 'test' }, vscode: { version: 'test' } }, trials: [
+    await writeFile(join(root, 'results.json'), JSON.stringify({ metadata: {
+      platform: 'linux', architecture: 'x64', node: 'test', host: {}, run: { id: 'run-id' }, measurement: {},
+      lvce: { version: 'test' }, vscode: { version: 'test' }, fixtures: {},
+    }, trials: [
       { editor: 'lvce', language: 'html', status: 'passed', openingMs: 12, filteringMs: 8, render: null },
       { editor: 'lvce', language: 'typescript', status: 'passed', openingMs: 14, filteringMs: 9, render: null },
       { editor: 'vscode', language: 'html', repeat: 0, status: 'failed', openingMs: null, filteringMs: null, render: null, error: 'missing <items>' },
@@ -19,6 +22,8 @@ test('report separates HTML and TypeScript comparisons, with visible failures an
     assert.equal((html.match(/<svg role="img"/g) ?? []).length, 12)
     assert.equal((html.match(/<h3>Completion opening<\/h3>/g) ?? []).length, 2)
     assert.ok(html.indexOf('HTML completions') < html.indexOf('TypeScript completions'))
+    assert.match(html, /Validated editors: LVCE Editor test · VS Code test/)
+    assert.doesNotMatch(html, /platform unknown|run unknown|fixtures unknown/)
     assert.match(html, /VS Code: no successful samples/)
     assert.match(html, /missing &lt;items&gt;/)
     assert.match(html, /raw\/.+-results.json/)
