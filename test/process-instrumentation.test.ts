@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { processInstrumentation, parseInspectorProcesses } from '../src/process-instrumentation.ts'
+import { processInstrumentation, utilityBootstrap, parseInspectorProcesses } from '../src/process-instrumentation.ts'
 
 test('preload instruments grandchildren even when fork overrides execArgv', async () => {
   const root = await mkdtemp(join(tmpdir(), 'completion-process-coverage-'))
@@ -29,4 +29,23 @@ test('preload instruments grandchildren even when fork overrides execArgv', asyn
 test('rejects malformed backend inspector records', () => {
   assert.throws(() => parseInspectorProcesses('{"pid":0,"argv":[],"url":""}'), /Malformed/)
   assert.throws(() => parseInspectorProcesses('incomplete'), SyntaxError)
+})
+
+
+test('utility bootstrap preserves entry argv and installs descendant instrumentation before entry', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'completion-utility-bootstrap-'))
+  try {
+    const entry = join(root, 'entry.cjs')
+    const preload = join(root, 'process-instrumentation.cjs')
+    const bootstrap = join(root, 'utility-bootstrap.cjs')
+    await writeFile(preload, processInstrumentation)
+    await writeFile(bootstrap, utilityBootstrap)
+    await writeFile(entry, `if(process.argv[1]!==${JSON.stringify(entry)} || process.argv[2]!=='argument') process.exit(2); process.exit(0);`)
+    const result = spawnSync(process.execPath, [bootstrap, 'argument'], { env: { ...process.env, COMPLETION_BENCHMARK_ENTRY: entry }, timeout: 15000 })
+    assert.equal(result.status, 0, result.stderr.toString())
+    const records = parseInspectorProcesses(await readFile(join(root, 'process-inspectors.jsonl'), 'utf8'))
+    assert.equal(records.length, 1)
+    assert.ok(records[0].argv.includes(entry))
+    assert.ok(!records[0].argv.includes(bootstrap))
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

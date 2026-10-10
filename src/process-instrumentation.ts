@@ -18,7 +18,13 @@ childProcess.fork = instrument(childProcess.fork);
 if (process.type === 'browser') {
   const electron = require('electron');
   if (typeof electron.utilityProcess?.fork !== 'function') throw new Error('Electron utilityProcess.fork is unavailable');
-  electron.utilityProcess.fork = instrument(electron.utilityProcess.fork);
+  const utilityFork = instrument(electron.utilityProcess.fork);
+  electron.utilityProcess.fork = function(file, args, options = {}) {
+    if (!Array.isArray(args)) { options = args || {}; args = undefined; }
+    return utilityFork.call(this, path.join(path.dirname(__filename), 'utility-bootstrap.cjs'), args, {
+      ...options, env: { ...(options.env || process.env), COMPLETION_BENCHMARK_ENTRY: file }
+    });
+  };
 }
 `
 
@@ -29,3 +35,16 @@ export function parseInspectorProcesses(text: string): InspectorProcess[] {
   if (records.some((record) => !Number.isSafeInteger(record.pid) || record.pid < 1 || !record.url?.startsWith('ws://') || !Array.isArray(record.argv))) throw new Error('Malformed backend inspector inventory')
   return [...new Map(records.map((record) => [record.pid, record])).values()]
 }
+
+// Electron utility processes do not execute Node --require preloads. Preserve
+// their original argv and load instrumentation before importing the real entry.
+export const utilityBootstrap = String.raw`
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const entry = process.env.COMPLETION_BENCHMARK_ENTRY;
+if (!entry) throw new Error('Missing utility entrypoint');
+delete process.env.COMPLETION_BENCHMARK_ENTRY;
+process.argv[1] = entry;
+require(path.join(__dirname, 'process-instrumentation.cjs'));
+import(pathToFileURL(entry).href).catch(error => { console.error(error); process.exit(1); });
+`

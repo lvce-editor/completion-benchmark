@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
-import { processInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
+import { processInstrumentation, utilityBootstrap, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
@@ -69,7 +69,10 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   await Promise.all([env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_CACHE_HOME, env.XDG_STATE_HOME].map((path) => mkdir(path, { recursive: true })))
   const preload = join(root, 'process-instrumentation.cjs')
   const inspectorInventory = join(root, 'process-inspectors.jsonl')
-  if (profiling) await writeFile(preload, processInstrumentation)
+  if (profiling) {
+    await writeFile(preload, processInstrumentation)
+    await writeFile(join(root, 'utility-bootstrap.cjs'), utilityBootstrap)
+  }
   const userData = join(root, 'profile')
   await mkdir(join(userData, 'User'), { recursive: true })
   await writeFile(join(userData, 'User/settings.json'), JSON.stringify({ 'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'editor.minimap.enabled': false, 'editor.quickSuggestions': false }))
@@ -284,7 +287,7 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
         try {
           const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean)
           const chromiumType = argv.find((arg) => arg.startsWith('--type='))
-          const nodeBackend = chromiumType ? argv.includes('--utility-sub-type=node.mojom.NodeService') : argv.some((arg) => /\.(?:c?js|mjs)$/.test(arg))
+          const nodeBackend = chromiumType ? argv.some((arg) => /^--utility-sub-type=.*NodeService$/.test(arg)) : argv.some((arg) => /\.(?:c?js|mjs)$/.test(arg))
           if (nodeBackend && !live.some((record) => record.pid === pid)) uncovered.push({ pid, argv })
         } catch { /* A process exited during the snapshot. */ }
       }
