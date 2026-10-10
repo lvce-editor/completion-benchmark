@@ -7,7 +7,11 @@ export class TargetSession {
   private nextId = 0
   private readonly pending = new Map<number, PendingRequest>()
   private readonly listener: (event: { sessionId: string; message: string }) => void
-  constructor(private readonly root: CDPSession, private readonly sessionId: string) {
+  private readonly root: CDPSession
+  private readonly sessionId: string
+  constructor(root: CDPSession, sessionId: string) {
+    this.root = root
+    this.sessionId = sessionId
     this.listener = ({ sessionId, message }) => {
       if (sessionId !== this.sessionId) return
       const data = JSON.parse(message) as CdpMessage

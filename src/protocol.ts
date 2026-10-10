@@ -1,7 +1,9 @@
 export class Protocol {
   private id = 0
   private readonly pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>()
-  private constructor(private readonly socket: WebSocket) {
+  private readonly socket: WebSocket
+  private constructor(socket: WebSocket) {
+    this.socket = socket
     socket.addEventListener('message', ({ data }) => {
       const message = JSON.parse(String(data))
       const pending = this.pending.get(message.id)
