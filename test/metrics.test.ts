@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { quantile, summarizeTrace, summarizeInteractionTrace } from '../src/metrics.ts'
+import { quantile, summarizeCpuProfile, summarizeTrace, summarizeInteractionTrace } from '../src/metrics.ts'
 
 test('summarizes Chromium paint and CSS recalculation count and duration', () => {
   assert.deepEqual(summarizeTrace([
@@ -21,6 +21,24 @@ test('reports nearest-rank median and p95', () => {
   assert.equal(quantile([9, 1, 3, 7, 5], 0.5), 5)
   assert.equal(quantile([9, 1, 3, 7, 5], 0.95), 9)
   assert.throws(() => quantile([], 0.5), /empty sample/)
+})
+
+test('estimates active JavaScript samples separately from idle and VM time', () => {
+  assert.deepEqual(summarizeCpuProfile({
+    nodes: [
+      { id: 1, callFrame: { functionName: 'render', url: 'app.js' } },
+      { id: 2, callFrame: { functionName: '(idle)', url: '' } },
+      { id: 3, callFrame: { functionName: '(garbage collector)', url: '' } },
+    ],
+    samples: [1, 2, 3, 1], timeDeltas: [1000, 2000, 3000, -20], startTime: 10, endTime: 6010,
+  }), { javascriptMs: 1, idleMs: 2, vmMs: 3, samples: 3, discardedSamples: 1, durationMs: 6 })
+})
+
+test('rejects incomplete or malformed CPU profiles instead of reporting zero', () => {
+  assert.throws(() => summarizeCpuProfile({ nodes: [], samples: [], timeDeltas: [], startTime: 1, endTime: 2 }), /Missing or inconsistent/)
+  assert.throws(() => summarizeCpuProfile({ nodes: [{ id: 1, callFrame: { functionName: 'run', url: '' } }], samples: [2], timeDeltas: [1], startTime: 1, endTime: 2 }), /Invalid CPU sample/)
+  assert.throws(() => summarizeCpuProfile({ nodes: [{ id: 1, callFrame: { functionName: 'run', url: '' } }], samples: [1, 1], timeDeltas: [1], startTime: 1, endTime: 2 }), /Missing or inconsistent/)
+  assert.throws(() => summarizeCpuProfile({ nodes: [{ id: 1, callFrame: { functionName: 'run', url: '' } }], samples: [1], timeDeltas: [1], startTime: 2, endTime: 1 }), /boundaries/)
 })
 
 const marker = (message: string, ts: number) => ({ name: 'TimeStamp', ts, args: { data: { message } } })

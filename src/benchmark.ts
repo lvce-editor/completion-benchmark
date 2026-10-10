@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, cp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
-import { summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
+import { Protocol } from './protocol.ts'
+import { TargetSession } from './target-session.ts'
+import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode'
@@ -14,17 +16,20 @@ interface Trial {
   editor: EditorId
   language: Language
   repeat: number
-  phase: 'latency' | 'render'
+  phase: 'latency' | 'render' | 'profile'
   status: 'passed' | 'failed'
   openingMs: number | null
   filteringMs: number | null
   render: ReturnType<typeof summarizeInteractionTrace> | null
   screenshot: string | null
   trace: string | null
+  javascript?: { frontendMs: number; backendMs: number; totalMs: number; profiles: JavaScriptProfile[]; coverage: { targets: number; workers: number; backendProcesses: number }; samplingIntervalMicroseconds: number; captureStartedAt: string; captureEndedAt: string; captureBoundary: string }
   warmupRequests?: number
   observations?: { opening: { row: string; highlight: string }; filtering: { row: string; highlight: string } }
   error?: string
 }
+
+interface JavaScriptProfile { side: 'frontend' | 'backend'; identity: Record<string, unknown>; file: string; javascriptMs: number; idleMs: number; vmMs: number; samples: number; discardedSamples: number; durationMs: number }
 
 const { values } = parseArgs({ options: {
   editor: { type: 'string' }, language: { type: 'string' }, repeats: { type: 'string', default: '3' }, output: { type: 'string', default: 'results' },
@@ -56,7 +61,7 @@ async function descendantsOf(rootPid: number): Promise<number[]> {
   return result
 }
 
-async function launch(editor: EditorId, language: Language, outputPrefix: string) {
+async function launch(editor: EditorId, language: Language, outputPrefix: string, profiling = false) {
   const root = await mkdtemp(join(tmpdir(), `completion-benchmark-${editor}-${language}-`))
   const env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(root, 'data'), XDG_CACHE_HOME: join(root, 'cache'), XDG_STATE_HOME: join(root, 'state') }
   await Promise.all([env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_CACHE_HOME, env.XDG_STATE_HOME].map((path) => mkdir(path, { recursive: true })))
@@ -69,7 +74,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   const binary = editor === 'lvce' ? setup.lvce.binary : setup.vscode.binary
   const workspace = resolve(`.tmp/fixture/${language}`)
   const file = join(workspace, language === 'html' ? 'index.html' : 'index.ts')
-  const args = ['--no-sandbox', '--disable-gpu', '--remote-debugging-port=0', `--user-data-dir=${userData}`]
+  const args = ['--no-sandbox', '--disable-gpu', '--remote-debugging-port=0', ...(profiling ? ['--inspect-brk=0'] : []), `--user-data-dir=${userData}`]
   if (editor === 'lvce') {
     const extension = join(root, 'data/lvce/extensions/builtin.language-features-typescript')
     await mkdir(join(root, 'config/lvce'), { recursive: true })
@@ -87,6 +92,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   child.stdout.on('data', (data) => { log += data })
   child.stderr.on('data', (data) => { log += data })
   let browser: Browser | undefined
+  let main: Protocol | undefined
   let closed = false
   const close = async () => {
     if (closed) return
@@ -96,6 +102,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     if (child.pid) {
       for (const pid of await descendantsOf(child.pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* Already exited. */ } }
     }
+    main?.close()
     await browser?.close().catch(() => {})
     if (child.pid && child.exitCode === null && child.signalCode === null) {
       try { process.kill(-child.pid, 'SIGTERM') } catch { /* The editor has already exited. */ }
@@ -111,6 +118,45 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   process.once('SIGTERM', interrupted)
   try {
     const deadline = Date.now() + 60000
+    if (profiling) {
+      let inspector = ''
+      while (Date.now() < deadline && !inspector) {
+        if (childError) throw childError
+        if (child.exitCode !== null) throw new Error(`Editor exited during inspector startup (${child.exitCode})`)
+        inspector = log.match(/Debugger listening on (ws:\/\/[^\s]+)/)?.[1] ?? ''
+        if (!inspector) await delay(50)
+      }
+      if (!inspector) throw new Error('Timed out waiting for main-process inspector')
+      main = await Protocol.connect(inspector)
+      await main.send('Debugger.enable')
+      const paused = main.event('Debugger.paused')
+      await main.send('Runtime.runIfWaitingForDebugger')
+      await paused
+      const instrumented = await main.send('Runtime.evaluate', { expression: `(()=>{
+        const load=process.getBuiltinModule?.('module').createRequire(process.cwd()+'/completion-benchmark.cjs');
+        if(!load) throw new Error('Node module loader unavailable for process instrumentation');
+        const electron=load('electron');
+        globalThis.__completionBenchmarkProcesses=[];
+        const original=electron.utilityProcess?.fork;
+        if(typeof original!=='function') throw new Error('Electron utilityProcess.fork is unavailable');
+        const instrument=(original,kind)=>function(file,args,options={}){
+          if(!Array.isArray(args)){options=args||{};args=undefined}
+          const child=original.call(this,file,args,{...options,execArgv:[...(options.execArgv||process.execArgv).filter(x=>!x.startsWith('--inspect')),'--inspect=0']});
+          const record={pid:0,file,kind,alive:true};
+          child.on('spawn',()=>{record.pid=child.pid;globalThis.__completionBenchmarkProcesses.push(record)});
+          child.on('exit',()=>record.alive=false);
+          child.stderr?.on('data',data=>process.stderr.write(data));
+          return child;
+        };
+        electron.utilityProcess.fork=instrument(original,'utility');
+        const childProcess=load('node:child_process');
+        if(typeof childProcess.fork==='function') childProcess.fork=instrument(childProcess.fork,'fork');
+        return true;
+      })()`, returnByValue: true })
+      if (instrumented.exceptionDetails || instrumented.result.value !== true) throw new Error(`Inspector process instrumentation failed: ${JSON.stringify(instrumented)}`)
+      await main.send('Debugger.resume')
+      await main.send('Debugger.disable')
+    }
     let endpoint = ''
     while (Date.now() < deadline && !endpoint) {
       if (childError) throw childError
@@ -142,22 +188,99 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       await writeFile(`${outputPrefix}-focus-failure.json`, JSON.stringify(active, null, 2)).catch(() => {})
       throw new Error('Editor input did not receive focus')
     }
-    return { page, close, editor, language }
+    return { page, close, editor, language, main, inspectorUrls: () => [...new Set([...log.matchAll(/Debugger listening on (ws:\/\/[^\s]+)/g)].map((match) => match[1]))] }
   } catch (error) {
     await close()
     throw error
   }
 }
 
-async function measure(editor: EditorId, language: Language, repeat: number, traced: boolean): Promise<Trial> {
-  const prefix = join(output, `${editor}-${language}-${repeat + 1}-${traced ? 'render' : 'latency'}`)
+async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: string, action: () => Promise<unknown>) {
+  if (!app.main) throw new Error('Missing main-process inspector')
+  const root = await app.page.context().newCDPSession(app.page)
+  const pageSession = await app.page.context().newCDPSession(app.page)
+  const sessions: { session: { send(method: string, params?: Record<string, unknown>): Promise<any> }; side: 'frontend' | 'backend'; identity: Record<string, unknown>; owned?: { close(): void | Promise<void> } }[] = []
+  const beforeTargets: any[] = []
+  const started: typeof sessions = []
+  let captureStartedAt = ''
+  let captureEndedAt = ''
+  try {
+    await pageSession.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true })
+    const { targetInfo: applicationTarget } = await pageSession.send('Target.getTargetInfo')
+    if (!applicationTarget?.targetId || applicationTarget.type !== 'page') throw new Error('Missing application page target')
+    const supported = ['page', 'worker', 'shared_worker', 'service_worker', 'iframe']
+    beforeTargets.push(...(await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type)))
+    if (!beforeTargets.some((target) => target.targetId === applicationTarget.targetId)) throw new Error('Missing application page target coverage')
+    const isolateIds = new Set<string>()
+    for (const target of beforeTargets) {
+      const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false })
+      const targetSession = new TargetSession(root, sessionId)
+      const { id } = await targetSession.send('Runtime.getIsolateId')
+      if (isolateIds.has(id)) { await targetSession.close(); continue }
+      isolateIds.add(id)
+      sessions.push({ session: targetSession, side: 'frontend', identity: { type: target.type, targetId: target.targetId, url: target.url, isolateId: id }, owned: targetSession })
+    }
+    const mainInfo = (await app.main.send('Runtime.evaluate', { expression: '({pid:process.pid,argv:process.argv})', returnByValue: true })).result.value
+    if (!Number.isSafeInteger(mainInfo?.pid)) throw new Error('Could not identify the Electron main process')
+    sessions.push({ session: app.main, side: 'backend', identity: { role: 'main', ...mainInfo } })
+    const beforeProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number; file: string; kind: string; alive: boolean }[]
+    const attachedPids = new Set([mainInfo.pid])
+    const inaccessible: string[] = []
+    for (const url of app.inspectorUrls().slice(1)) {
+      let session: Protocol | undefined
+      try {
+        session = await Protocol.connect(url)
+        const info = (await session.send('Runtime.evaluate', { expression: '({pid:process.pid,argv:process.argv})', returnByValue: true })).result.value
+        if (!beforeProcesses.some((process) => process.pid === info.pid) || attachedPids.has(info.pid)) { session.close(); continue }
+        attachedPids.add(info.pid)
+        const process = beforeProcesses.find((candidate) => candidate.pid === info.pid)!
+        sessions.push({ session, side: 'backend', identity: { role: process.kind, file: process.file, ...info }, owned: session })
+      } catch (error) { session?.close(); inaccessible.push(String(error)) }
+    }
+    const uncovered = beforeProcesses.filter((process) => !attachedPids.has(process.pid))
+    if (uncovered.length) throw new Error(`Missing backend inspector coverage: ${JSON.stringify({ beforeProcesses, attachedPids: [...attachedPids], inaccessible, uncovered })}`)
+    if (!sessions.some((entry) => entry.side === 'frontend' && entry.identity.type === 'worker') && app.editor === 'lvce') throw new Error('Missing LVCE frontend worker coverage')
+    for (const entry of sessions) {
+      await entry.session.send('Profiler.enable')
+      await entry.session.send('Profiler.setSamplingInterval', { interval: 1000 })
+    }
+    captureStartedAt = new Date().toISOString()
+    for (const entry of sessions) { await entry.session.send('Profiler.start'); started.push(entry) }
+    const actionResult = await action()
+    captureEndedAt = new Date().toISOString()
+    const profiles: JavaScriptProfile[] = []
+    for (const [index, entry] of sessions.entries()) {
+      const { profile } = await entry.session.send('Profiler.stop')
+      const file = `${basename(prefix)}-${entry.side}-${index}.cpuprofile`
+      await writeFile(join(output, file), JSON.stringify(profile))
+      profiles.push({ side: entry.side, identity: entry.identity, file, ...summarizeCpuProfile(profile) })
+      started.splice(started.indexOf(entry), 1)
+    }
+    const afterProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number }[]
+    const afterTargets = (await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type))
+    if (beforeProcesses.map((process) => process.pid).sort().join() !== afterProcesses.map((process) => process.pid).sort().join() || beforeTargets.map((target) => target.targetId).sort().join() !== afterTargets.map((target: any) => target.targetId).sort().join()) throw new Error(`Profiler process/target membership changed during interaction: ${JSON.stringify({ beforeProcesses, afterProcesses, beforeTargets, afterTargets })}`)
+    const frontendMs = profiles.filter((profile) => profile.side === 'frontend').reduce((sum, profile) => sum + profile.javascriptMs, 0)
+    const backendMs = profiles.filter((profile) => profile.side === 'backend').reduce((sum, profile) => sum + profile.javascriptMs, 0)
+    return { actionResult, profiles, frontendMs, backendMs, totalMs: frontendMs + backendMs, coverage: { targets: beforeTargets.length, workers: beforeTargets.filter((target) => target.type === 'worker').length, backendProcesses: beforeProcesses.length + 1 }, samplingIntervalMicroseconds: 1000, captureStartedAt, captureEndedAt, captureBoundary: 'Profiler start immediately before opening Ctrl+Space keydown through query-qualified filtering endpoint after two animation frames' }
+  } finally {
+    await Promise.allSettled(started.map((entry) => entry.session.send('Profiler.stop')))
+    await Promise.allSettled(sessions.map((entry) => entry.owned?.close()))
+    await pageSession.detach().catch(() => {})
+    await root.detach().catch(() => {})
+  }
+}
+
+async function measure(editor: EditorId, language: Language, repeat: number, phase: Trial['phase']): Promise<Trial> {
+  const prefix = join(output, `${editor}-${language}-${repeat + 1}-${phase}`)
+  const traced = phase === 'render'
+  const profiling = phase === 'profile'
   let app: Awaited<ReturnType<typeof launch>> | undefined
   let page: Page | undefined
   let session: CDPSession | undefined
   const events: TraceEvent[] = []
   let stage = 'launch'
   try {
-    app = await launch(editor, language, prefix)
+    app = await launch(editor, language, prefix, profiling)
     page = app.page
     const expected = language === 'html' ? 'a' : 'Array'
     const filteredExpected = language === 'html' ? 'h1' : 'Array'
@@ -172,17 +295,22 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
       session.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => events.push(...data.value))
       await session.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' })
     }
-    stage = 'opening'
-    await armCompletion(page, editor, expected, 'Space', undefined, { traceMarkers: traced })
-    await page.keyboard.press('Control+Space')
-    const opening = await collectCompletion(page)
-    const openingMs = opening.milliseconds
-    stage = 'filtering'
-    await armCompletion(page, editor, filteredExpected, filterCode, language === 'html' ? 'h' : 'Arra', { traceMarkers: traced })
-    await page.keyboard.press(filterKey)
-    const filtering = await collectCompletion(page)
-    const filteringMs = filtering.milliseconds
-    if (openingMs === undefined || filteringMs === undefined) throw new Error('A timed completion interaction did not include its trusted keydown timestamp')
+    const interaction = async () => {
+      stage = 'opening'
+      await armCompletion(page!, editor, expected, 'Space', undefined, { traceMarkers: traced })
+      await page!.keyboard.press('Control+Space')
+      const opening = await collectCompletion(page!)
+      stage = 'filtering'
+      await armCompletion(page!, editor, filteredExpected, filterCode, language === 'html' ? 'h' : 'Arra', { traceMarkers: traced })
+      await page!.keyboard.press(filterKey)
+      const filtering = await collectCompletion(page!)
+      if (opening.milliseconds === undefined || filtering.milliseconds === undefined) throw new Error('A timed completion interaction did not include its trusted keydown timestamp')
+      return { opening, filtering }
+    }
+    const profileResult = profiling ? await profileWorkload(app, prefix, interaction) : undefined
+    const timings = (profileResult?.actionResult ?? await interaction()) as Awaited<ReturnType<typeof interaction>>
+    const openingMs = timings?.opening.milliseconds ?? (profiling ? null : undefined)
+    const filteringMs = timings?.filtering.milliseconds ?? (profiling ? null : undefined)
     let render = null
     let trace: string | null = null
     stage = 'trace summary'
@@ -196,7 +324,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
     }
     const screenshot = `${editor}-${language}-${repeat + 1}-${traced ? 'render' : 'latency'}.png`
     await page.screenshot({ path: join(output, screenshot) })
-    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'passed', warmupRequests, openingMs, filteringMs, observations: { opening, filtering }, render, screenshot, trace }
+    return { editor, language, repeat, phase, status: 'passed', warmupRequests, openingMs: openingMs ?? null, filteringMs: filteringMs ?? null, observations: profiling && timings ? { opening: timings.opening, filtering: timings.filtering } : undefined, render, screenshot, trace, javascript: profileResult ? { frontendMs: profileResult.frontendMs, backendMs: profileResult.backendMs, totalMs: profileResult.totalMs, profiles: profileResult.profiles, coverage: profileResult.coverage, samplingIntervalMicroseconds: profileResult.samplingIntervalMicroseconds, captureStartedAt: profileResult.captureStartedAt, captureEndedAt: profileResult.captureEndedAt, captureBoundary: profileResult.captureBoundary } : undefined }
   } catch (error) {
     if (page) {
       const evidence = await page.evaluate(() => ({
@@ -209,7 +337,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
       await writeFile(`${prefix}-failure.json`, JSON.stringify({ stage, error: String(error), evidence }, null, 2)).catch(() => {})
       await page.screenshot({ path: `${prefix}-failure.png` }).catch(() => {})
     }
-    return { editor, language, repeat, phase: traced ? 'render' : 'latency', status: 'failed', openingMs: null, filteringMs: null, render: null, screenshot: null, trace: null, error: `${stage}: ${String(error)}` }
+    return { editor, language, repeat, phase, status: 'failed', openingMs: null, filteringMs: null, render: null, screenshot: null, trace: null, error: `${stage}: ${String(error)}` }
   } finally {
     await session?.detach().catch(() => {})
     await app?.close().catch(() => {})
@@ -217,9 +345,12 @@ async function measure(editor: EditorId, language: Language, repeat: number, tra
 }
 
 for (const editor of editors) for (const language of languages) for (let repeat = 0; repeat < repeats; repeat++) {
-  const latency = await measure(editor, language, repeat, false)
+  const latency = await measure(editor, language, repeat, 'latency')
   trials.push(latency)
-  if (latency.status === 'passed') trials.push(await measure(editor, language, repeat, true))
+  if (latency.status === 'passed') {
+    trials.push(await measure(editor, language, repeat, 'render'))
+    trials.push(await measure(editor, language, repeat, 'profile'))
+  }
   await writeFile(join(output, 'results.json'), `${JSON.stringify({ schemaVersion: 1, metadata: setup, trials }, null, 2)}\n`)
   console.log(trials.at(-1))
 }

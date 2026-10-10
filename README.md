@@ -1,6 +1,6 @@
 # LVCE Editor completion benchmark
 
-This repository measures completion opening, incremental filtering, browser paint work and CSS style recalculation in the official LVCE Editor and VS Code desktop applications. It runs HTML and TypeScript fixtures in fresh, isolated profiles. Results from successful runs on `main` are published through GitHub Pages.
+This repository measures completion opening, incremental filtering, browser paint work, CSS style recalculation and estimated JavaScript execution time in the official LVCE Editor and VS Code desktop applications. It runs HTML and TypeScript fixtures in fresh, isolated profiles. Results from successful runs on `main` are published through GitHub Pages.
 
 ## Run locally
 
@@ -26,7 +26,9 @@ The report uses the official LVCE Editor v0.120.7 package, its bundled HTML prov
 
 Paint and CSS measurements use a separate Chromium tracing pass. Renderer timestamp markers bound the interval from the opening Ctrl+Space keydown through the query-qualified filtering endpoint; events after that interval are excluded, and completed durations crossing a boundary are clipped. Incomplete rendering events within the interval fail the sample. This prevents unrelated work interrupted by capture shutdown from corrupting the measurement. Paint duration and event count come from Chromium `Paint` events. CSS style-recalculation duration and event count sum `UpdateLayoutTree` and `RecalculateStyles` events. Tracing adds overhead, so these runs are kept out of latency charts. The Linux runs disable GPU acceleration; GPU rasterization, compositing and physical display latency are excluded. Missing paint or style evidence fails the traced sample rather than reporting a synthetic zero.
 
-The report separates HTML and TypeScript into distinct sections. Each section compares opening and live filtering latency, paint duration/count, and CSS style recalculation duration/count, with median, p95 and sample count. Each chart states which editors have validated samples and which have no validated measurements. Raw trial JSON records every interaction and pinned version; screenshots and Chromium trace events provide visual and rendering evidence. Hosted runner load, language providers and editor behavior affect comparisons, so small differences are not reliable rankings.
+JavaScript estimates use another isolated profiling launch. V8's CPU profiler samples at 1 ms while completion opening and query-qualified filtering run. Frontend totals include each unique renderer and web-worker isolate. Backend totals include Electron's main process and every discovered live Electron utility or forked child process; raw profiles identify each by PID, command-line arguments and script path, including `tsserver.js` when the editor launches it through either instrumented API. A missing child-process inspector, an uncovered backend process, an absent LVCE worker isolate or changed renderer/worker/process membership fails the sample. Each result records frontend, backend and total JavaScript milliseconds; total equals frontend plus backend. Active JavaScript samples contribute to those totals; idle and VM/garbage-collection samples are kept separately in raw summaries. Raw `.cpuprofile` files are published alongside results. Inspector instrumentation and profiling add overhead, and short operations may be undersampled, so these are estimates rather than latency measurements or exact CPU accounting.
+
+The report separates HTML and TypeScript into distinct sections. Each section compares opening and live filtering latency, paint duration/count, CSS style recalculation duration/count, and frontend/backend/total JavaScript time, with median, p95 and sample count. Each chart states which editors have validated samples and which have no validated measurements. Raw trial JSON records every interaction, profiler coverage and pinned version; screenshots, Chromium trace events and V8 CPU profiles provide evidence. Hosted runner load, language providers and editor behavior affect comparisons, so small differences are not reliable rankings.
 
 ## Editor coverage
 
@@ -34,7 +36,7 @@ LVCE Editor and VS Code have validated desktop adapters and run for HTML and Typ
 
 ## CI and publication
 
-Pull requests run type checking, lint, focused measurement tests and one real desktop run for each editor/language pair. Main runs five repetitions for each pair, combines the JSON and trace artifacts, creates the static report, and deploys it to GitHub Pages only after all four desktop jobs succeed.
+Pull requests run type checking, lint, focused measurement tests and one real desktop run for each editor/language pair, including CPU-profile capture and backend/frontend coverage validation. Main runs five repetitions for each pair, combines the JSON, trace and CPU-profile artifacts, creates the static report, and deploys it to GitHub Pages only after all four desktop jobs succeed.
 
 ## References
 

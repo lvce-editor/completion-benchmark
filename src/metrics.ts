@@ -1,5 +1,24 @@
 export interface TraceEvent { name?: string; ph?: string; pid?: number; tid?: number; ts?: number; dur?: number; args?: { data?: Record<string, unknown> } }
 
+export interface CpuProfile { nodes: { id: number; callFrame: { functionName: string; url: string } }[]; samples: number[]; timeDeltas: number[]; startTime: number; endTime: number }
+
+export function summarizeCpuProfile(profile: CpuProfile) {
+  if (!Array.isArray(profile.nodes) || !Array.isArray(profile.samples) || !profile.samples.length || !Array.isArray(profile.timeDeltas) || profile.samples.length !== profile.timeDeltas.length) throw new Error('Missing or inconsistent CPU samples')
+  if (!Number.isFinite(profile.startTime) || !Number.isFinite(profile.endTime) || profile.endTime <= profile.startTime) throw new Error('Invalid CPU profile boundaries')
+  const nodes = new Map(profile.nodes.map((node) => [node.id, node.callFrame]))
+  let activeUs = 0, idleUs = 0, vmUs = 0, discardedSamples = 0
+  for (let index = 0; index < profile.samples.length; index++) {
+    const frame = nodes.get(profile.samples[index]!)
+    const delta = profile.timeDeltas[index]!
+    if (!frame || typeof frame.functionName !== 'string' || !Number.isFinite(delta) || delta < -1000) throw new Error('Invalid CPU sample')
+    if (delta < 0) { discardedSamples++; continue }
+    if (frame.functionName === '(idle)') idleUs += delta
+    else if (['(program)', '(garbage collector)', '(root)'].includes(frame.functionName)) vmUs += delta
+    else activeUs += delta
+  }
+  return { javascriptMs: activeUs / 1000, idleMs: idleUs / 1000, vmMs: vmUs / 1000, samples: profile.samples.length - discardedSamples, discardedSamples, durationMs: (profile.endTime - profile.startTime) / 1000 }
+}
+
 export interface TraceSummary {
   paintCount: number
   paintDurationMs: number
