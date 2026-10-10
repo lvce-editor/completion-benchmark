@@ -35,6 +35,8 @@ test('report charts retain statistics, zero values, missing groups and failures'
     assert.match(html, /missing &lt;items&gt;/)
     assert.match(html, /raw\/.+-results.json/)
     assert.match(html, /12.00 \/ 12.00 ms \(n=1\)/)
+    assert.match(html, /<link rel="icon" href="favicon\.svg" type="image\/svg\+xml">/)
+    assert.equal(await readFile(join(root, 'site/favicon.svg'), 'utf8'), await readFile(resolve('assets/favicon.svg'), 'utf8'))
     assert.match(html, /Frontend JavaScript execution time/)
     assert.match(html, /Total JavaScript/)
     assert.match(html, /No successful samples/)
