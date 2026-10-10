@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
+import { ProfileSetupTargetExited, withFreshProfileSetup } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
 
@@ -196,6 +197,10 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
 }
 
 async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: string, action: () => Promise<unknown>) {
+  return withFreshProfileSetup((attempt) => captureProfileWorkload(app, `${prefix}-capture-${attempt}`, action))
+}
+
+async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: string, action: () => Promise<unknown>) {
   if (!app.main) throw new Error('Missing main-process inspector')
   const root = await app.browser!.newBrowserCDPSession()
   const pageSession = await app.page.context().newCDPSession(app.page)
@@ -205,19 +210,25 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
   let captureStartedAt = ''
   let captureEndedAt = ''
   let profilerStage = 'page auto-attach'
+  let interactionStarted = false
+  const destroyedTargets = new Set<string>()
   const lifecycle: Record<string, unknown>[] = []
   const record = (event: string, details: Record<string, unknown> = {}) => {
     lifecycle.push({ at: new Date().toISOString(), elapsedMs: performance.now(), stage: profilerStage, event, ...details })
   }
   const listeners = [root, pageSession].flatMap((session, index) =>
     (['Target.attachedToTarget', 'Target.detachedFromTarget', 'Target.targetCreated', 'Target.targetDestroyed', 'Target.targetInfoChanged'] as const).map((event) => {
-      const listener = (details: Record<string, unknown>) => record(event, { source: index === 0 ? 'browser' : 'page', ...details })
+      const listener = (details: Record<string, unknown>) => {
+        if (event === 'Target.targetDestroyed' && typeof details.targetId === 'string') destroyedTargets.add(details.targetId)
+        record(event, { source: index === 0 ? 'browser' : 'page', ...details })
+      }
       session.on(event, listener)
       return { session, event, listener }
     }))
   const snapshot = async (label: string) => {
     const { targetInfos } = await root.send('Target.getTargets')
     record('target inventory', { label, targetInfos })
+    return targetInfos
   }
   const command = async (entry: typeof sessions[number], method: string, params: Record<string, unknown> = {}) => {
     record('command sent', { method, side: entry.side, identity: entry.identity })
@@ -299,7 +310,9 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
       catch (error) { throw new Error(`${profilerStage}: ${String(error)}`) }
     }
     profilerStage = 'run completion interaction'
-    await snapshot('before interaction')
+    const interactionTargets = (await snapshot('before interaction')).filter((target: any) => supported.includes(target.type))
+    if (beforeTargets.map((target) => target.targetId).sort().join() !== interactionTargets.map((target: any) => target.targetId).sort().join()) throw new Error('Frontend target membership changed during profiler setup')
+    interactionStarted = true
     record('interaction start')
     const actionResult = await action()
     record('interaction end')
@@ -323,7 +336,15 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
     return { actionResult, profiles, frontendMs, backendMs, totalMs: frontendMs + backendMs, coverage: { targets: beforeTargets.length, workers: beforeTargets.filter((target) => target.type === 'worker').length, backendProcesses: beforeProcesses.length + 1 }, samplingIntervalMicroseconds: 1000, captureStartedAt, captureEndedAt, captureBoundary: 'Profiler start immediately before opening Ctrl+Space keydown through query-qualified filtering endpoint after two animation frames' }
   } catch (error) {
     record('failure', { error: String(error) })
-    await snapshot('failure').catch((snapshotError) => record('inventory failed', { error: String(snapshotError) }))
+    const currentTargets = await snapshot('failure').catch((snapshotError) => {
+      record('inventory failed', { error: String(snapshotError) })
+      return undefined
+    })
+    const exitedTargets = beforeTargets.filter((target) => destroyedTargets.has(target.targetId) && currentTargets && !currentTargets.some((current: any) => current.targetId === target.targetId))
+    if (!interactionStarted && exitedTargets.length) {
+      record('discarded setup capture', { exitedTargets, reason: 'Verified target destruction before completion interaction; restart with a fresh complete inventory' })
+      throw new ProfileSetupTargetExited(`Target exited before interaction: ${JSON.stringify(exitedTargets)}; cause: ${String(error)}`)
+    }
     throw new Error(`Profiler setup failed at ${profilerStage}: ${String(error)}`)
   } finally {
     // Persist before teardown so cleanup detach events cannot be mistaken for the failure.
