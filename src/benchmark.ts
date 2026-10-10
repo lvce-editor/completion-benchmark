@@ -205,7 +205,33 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
   let captureStartedAt = ''
   let captureEndedAt = ''
   let profilerStage = 'page auto-attach'
+  const lifecycle: Record<string, unknown>[] = []
+  const record = (event: string, details: Record<string, unknown> = {}) => {
+    lifecycle.push({ at: new Date().toISOString(), elapsedMs: performance.now(), stage: profilerStage, event, ...details })
+  }
+  const listeners = [root, pageSession].flatMap((session, index) =>
+    (['Target.attachedToTarget', 'Target.detachedFromTarget', 'Target.targetCreated', 'Target.targetDestroyed', 'Target.targetInfoChanged'] as const).map((event) => {
+      const listener = (details: Record<string, unknown>) => record(event, { source: index === 0 ? 'browser' : 'page', ...details })
+      session.on(event, listener)
+      return { session, event, listener }
+    }))
+  const snapshot = async (label: string) => {
+    const { targetInfos } = await root.send('Target.getTargets')
+    record('target inventory', { label, targetInfos })
+  }
+  const command = async (entry: typeof sessions[number], method: string, params: Record<string, unknown> = {}) => {
+    record('command sent', { method, side: entry.side, identity: entry.identity })
+    try {
+      const result = await entry.session.send(method, params)
+      record('command completed', { method, side: entry.side, identity: entry.identity })
+      return result
+    } catch (error) {
+      record('command failed', { method, side: entry.side, identity: entry.identity, error: String(error) })
+      throw error
+    }
+  }
   try {
+    await root.send('Target.setDiscoverTargets', { discover: true })
     await pageSession.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true })
     profilerStage = 'read application target'
     const { targetInfo: applicationTarget } = await pageSession.send('Target.getTargetInfo')
@@ -214,6 +240,7 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
     profilerStage = 'discover frontend targets'
     const discoveredTargets = (await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type))
     beforeTargets.push(...discoveredTargets)
+    record('initial target inventory', { targets: beforeTargets })
     if (!beforeTargets.some((target) => target.targetId === applicationTarget.targetId)) throw new Error('Missing application page target coverage')
     const isolateIds = new Set<string>()
     for (const target of beforeTargets) {
@@ -222,11 +249,12 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
       profilerStage = `attach frontend target ${target.type} ${target.targetId}`
       try {
         ({ sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false }))
+        record('target attached', { target, sessionId })
         targetSession = new TargetSession(root, sessionId!)
         const { id } = await targetSession.send('Runtime.getIsolateId')
         if (isolateIds.has(id)) { await targetSession.close(); continue }
         isolateIds.add(id)
-        sessions.push({ session: targetSession, side: 'frontend', identity: { type: target.type, targetId: target.targetId, url: target.url, isolateId: id }, owned: targetSession })
+        sessions.push({ session: targetSession, side: 'frontend', identity: { type: target.type, targetId: target.targetId, url: target.url, isolateId: id, sessionId }, owned: targetSession })
       } catch (error) {
         await targetSession?.close().catch(() => {})
         const currentTargets = (await root.send('Target.getTargets')).targetInfos.filter((entry: any) => supported.includes(entry.type))
@@ -258,24 +286,29 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
     for (const entry of sessions) {
       profilerStage = `enable profiler for ${entry.side} ${JSON.stringify(entry.identity)}`
       try {
-        await entry.session.send('Profiler.enable')
-        await entry.session.send('Profiler.setSamplingInterval', { interval: 1000 })
+        await command(entry, 'Profiler.enable')
+        await command(entry, 'Profiler.setSamplingInterval', { interval: 1000 })
       } catch (error) { throw new Error(`${profilerStage}: ${String(error)}`) }
     }
+    await snapshot('before profiler start')
     captureStartedAt = new Date().toISOString()
+    record('capture start', { captureStartedAt })
     for (const entry of sessions) {
       profilerStage = `start profiler for ${entry.side} ${JSON.stringify(entry.identity)}`
-      try { await entry.session.send('Profiler.start'); started.push(entry) }
+      try { await command(entry, 'Profiler.start'); started.push(entry) }
       catch (error) { throw new Error(`${profilerStage}: ${String(error)}`) }
     }
     profilerStage = 'run completion interaction'
+    await snapshot('before interaction')
+    record('interaction start')
     const actionResult = await action()
+    record('interaction end')
     captureEndedAt = new Date().toISOString()
     const profiles: JavaScriptProfile[] = []
     for (const [index, entry] of sessions.entries()) {
       profilerStage = `stop profiler for ${entry.side} ${JSON.stringify(entry.identity)}`
       let profile: unknown
-      try { ({ profile } = await entry.session.send('Profiler.stop')) }
+      try { ({ profile } = await command(entry, 'Profiler.stop')) }
       catch (error) { throw new Error(`${profilerStage}: ${String(error)}`) }
       const file = `${basename(prefix)}-${entry.side}-${index}.cpuprofile`
       await writeFile(join(output, file), JSON.stringify(profile))
@@ -289,12 +322,20 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
     const backendMs = profiles.filter((profile) => profile.side === 'backend').reduce((sum, profile) => sum + profile.javascriptMs, 0)
     return { actionResult, profiles, frontendMs, backendMs, totalMs: frontendMs + backendMs, coverage: { targets: beforeTargets.length, workers: beforeTargets.filter((target) => target.type === 'worker').length, backendProcesses: beforeProcesses.length + 1 }, samplingIntervalMicroseconds: 1000, captureStartedAt, captureEndedAt, captureBoundary: 'Profiler start immediately before opening Ctrl+Space keydown through query-qualified filtering endpoint after two animation frames' }
   } catch (error) {
+    record('failure', { error: String(error) })
+    await snapshot('failure').catch((snapshotError) => record('inventory failed', { error: String(snapshotError) }))
     throw new Error(`Profiler setup failed at ${profilerStage}: ${String(error)}`)
   } finally {
-    await Promise.allSettled(started.map((entry) => entry.session.send('Profiler.stop')))
-    await Promise.allSettled(sessions.map((entry) => entry.owned?.close()))
-    await pageSession.detach().catch(() => {})
-    await root.detach().catch(() => {})
+    // Persist before teardown so cleanup detach events cannot be mistaken for the failure.
+    for (const { session, event, listener } of listeners) session.off(event, listener)
+    try {
+      await writeFile(`${prefix}-profiler-lifecycle.json`, JSON.stringify({ captureStartedAt, captureEndedAt, lifecycle }, null, 2))
+    } finally {
+      await Promise.allSettled(started.map((entry) => entry.session.send('Profiler.stop')))
+      await Promise.allSettled(sessions.map((entry) => entry.owned?.close()))
+      await pageSession.detach().catch(() => {})
+      await root.detach().catch(() => {})
+    }
   }
 }
 
