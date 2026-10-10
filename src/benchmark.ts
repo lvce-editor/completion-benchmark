@@ -155,6 +155,41 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     }
     if (!endpoint) throw new Error(`Timed out waiting for CDP endpoint; output: ${log.slice(-1500)}`)
     browser = await chromium.connectOverCDP(endpoint, { timeout: 30000 })
+    if (profiling && editor === 'vscode') {
+      // Observe the pinned editor's startup CPU-baseline worker from the earliest
+      // browser connection. It must finish before capture; no timed action retries.
+      const startupSession = await browser.newBrowserCDPSession()
+      const startupEvents: Record<string, unknown>[] = []
+      const baselineTargets = new Set<string>()
+      let resolveStartup: () => void = () => {}
+      let rejectStartup: (error: Error) => void = () => {}
+      const ready = new Promise<void>((resolve, reject) => { resolveStartup = resolve; rejectStartup = reject })
+      const observe = ({ targetInfo }: { targetInfo: { targetId: string; title: string } }) => {
+        if (targetInfo.title === 'perfBaseline') {
+          baselineTargets.add(targetInfo.targetId)
+          startupEvents.push({ event: 'baseline observed', at: new Date().toISOString(), targetInfo })
+        }
+      }
+      const destroyed = ({ targetId }: { targetId: string }) => {
+        if (baselineTargets.has(targetId)) {
+          startupEvents.push({ event: 'baseline destroyed', at: new Date().toISOString(), targetId })
+          resolveStartup()
+        }
+      }
+      startupSession.on('Target.targetCreated', observe)
+      startupSession.on('Target.targetInfoChanged', observe)
+      startupSession.on('Target.targetDestroyed', destroyed)
+      const timer = setTimeout(() => rejectStartup(new Error('VS Code startup perfBaseline worker completion was not observed')), 30000)
+      ready.catch(() => {})
+      try {
+        await startupSession.send('Target.setDiscoverTargets', { discover: true })
+        await ready
+      } finally {
+        clearTimeout(timer)
+        await writeFile(`${outputPrefix}-startup-workers.json`, JSON.stringify(startupEvents, null, 2))
+        await startupSession.detach().catch(() => {})
+      }
+    }
     let page: Page | undefined
     while (Date.now() < deadline && !page) {
       page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() !== 'about:blank')
