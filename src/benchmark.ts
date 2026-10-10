@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
-import { ProfileSetupTargetExited, withFreshProfileSetup } from './profile-setup.ts'
+import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
 
@@ -212,6 +212,9 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
   let profilerStage = 'page auto-attach'
   let interactionStarted = false
   const destroyedTargets = new Set<string>()
+  const targetChanges: { kind: 'created' | 'destroyed'; targetId: string; observedAt: number }[] = []
+  let captureStart = 0
+  let captureEnd = 0
   const lifecycle: Record<string, unknown>[] = []
   const record = (event: string, details: Record<string, unknown> = {}) => {
     lifecycle.push({ at: new Date().toISOString(), elapsedMs: performance.now(), stage: profilerStage, event, ...details })
@@ -219,7 +222,14 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
   const listeners = [root, pageSession].flatMap((session, index) =>
     (['Target.attachedToTarget', 'Target.detachedFromTarget', 'Target.targetCreated', 'Target.targetDestroyed', 'Target.targetInfoChanged'] as const).map((event) => {
       const listener = (details: Record<string, unknown>) => {
-        if (event === 'Target.targetDestroyed' && typeof details.targetId === 'string') destroyedTargets.add(details.targetId)
+        if (index === 0 && event === 'Target.targetDestroyed' && typeof details.targetId === 'string') {
+          destroyedTargets.add(details.targetId)
+          targetChanges.push({ kind: 'destroyed', targetId: details.targetId, observedAt: performance.now() })
+        }
+        if (index === 0 && event === 'Target.targetCreated') {
+          const target = details.targetInfo as { type: string; targetId: string }
+          if (['page', 'worker', 'shared_worker', 'service_worker', 'iframe'].includes(target.type)) targetChanges.push({ kind: 'created', targetId: target.targetId, observedAt: performance.now() })
+        }
         record(event, { source: index === 0 ? 'browser' : 'page', ...details })
       }
       session.on(event, listener)
@@ -302,6 +312,7 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
       } catch (error) { throw new Error(`${profilerStage}: ${String(error)}`) }
     }
     await snapshot('before profiler start')
+    captureStart = performance.now()
     captureStartedAt = new Date().toISOString()
     record('capture start', { captureStartedAt })
     for (const entry of sessions) {
@@ -316,7 +327,13 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
     record('interaction start')
     const actionResult = await action()
     record('interaction end')
+    const afterTargets = (await snapshot('interaction endpoint')).filter((target: any) => supported.includes(target.type))
+    captureEnd = performance.now()
     captureEndedAt = new Date().toISOString()
+    record('capture end', { captureEndedAt })
+    assertProfileTargetMembership(beforeTargets.map((target) => target.targetId), afterTargets.map((target: any) => target.targetId), targetChanges, captureStart, captureEnd)
+    const afterProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number }[]
+    if (beforeProcesses.map((process) => process.pid).sort().join() !== afterProcesses.map((process) => process.pid).sort().join()) throw new Error(`Profiler backend membership changed during interaction: ${JSON.stringify({ beforeProcesses, afterProcesses })}`)
     const profiles: JavaScriptProfile[] = []
     for (const [index, entry] of sessions.entries()) {
       profilerStage = `stop profiler for ${entry.side} ${JSON.stringify(entry.identity)}`
@@ -328,12 +345,9 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
       profiles.push({ side: entry.side, identity: entry.identity, file, ...summarizeCpuProfile(profile as Parameters<typeof summarizeCpuProfile>[0]) })
       started.splice(started.indexOf(entry), 1)
     }
-    const afterProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number }[]
-    const afterTargets = (await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type))
-    if (beforeProcesses.map((process) => process.pid).sort().join() !== afterProcesses.map((process) => process.pid).sort().join() || beforeTargets.map((target) => target.targetId).sort().join() !== afterTargets.map((target: any) => target.targetId).sort().join()) throw new Error(`Profiler process/target membership changed during interaction: ${JSON.stringify({ beforeProcesses, afterProcesses, beforeTargets, afterTargets })}`)
     const frontendMs = profiles.filter((profile) => profile.side === 'frontend').reduce((sum, profile) => sum + profile.javascriptMs, 0)
     const backendMs = profiles.filter((profile) => profile.side === 'backend').reduce((sum, profile) => sum + profile.javascriptMs, 0)
-    return { actionResult, profiles, frontendMs, backendMs, totalMs: frontendMs + backendMs, coverage: { targets: beforeTargets.length, workers: beforeTargets.filter((target) => target.type === 'worker').length, backendProcesses: beforeProcesses.length + 1 }, samplingIntervalMicroseconds: 1000, captureStartedAt, captureEndedAt, captureBoundary: 'Profiler start immediately before opening Ctrl+Space keydown through query-qualified filtering endpoint after two animation frames' }
+    return { actionResult, profiles, frontendMs, backendMs, totalMs: frontendMs + backendMs, coverage: { targets: beforeTargets.length, workers: beforeTargets.filter((target) => target.type === 'worker').length, backendProcesses: beforeProcesses.length + 1 }, samplingIntervalMicroseconds: 1000, captureStartedAt, captureEndedAt, captureBoundary: 'Profiler start immediately before opening Ctrl+Space keydown through query-qualified filtering endpoint after two animation frames and endpoint target inventory acknowledgement' }
   } catch (error) {
     record('failure', { error: String(error) })
     const currentTargets = await snapshot('failure').catch((snapshotError) => {
@@ -350,7 +364,7 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
     // Persist before teardown so cleanup detach events cannot be mistaken for the failure.
     for (const { session, event, listener } of listeners) session.off(event, listener)
     try {
-      await writeFile(`${prefix}-profiler-lifecycle.json`, JSON.stringify({ captureStartedAt, captureEndedAt, lifecycle }, null, 2))
+      await writeFile(`${prefix}-profiler-lifecycle.json`, JSON.stringify({ captureStartedAt, captureEndedAt, captureStart, captureEnd, targetChanges, lifecycle }, null, 2))
     } finally {
       await Promise.allSettled(started.map((entry) => entry.session.send('Profiler.stop')))
       await Promise.allSettled(sessions.map((entry) => entry.owned?.close()))
