@@ -18,6 +18,25 @@ class NativeObservationTests(unittest.TestCase):
         self.assertFalse(native.matches_template(moved_stale, filtering, opening))
         self.assertTrue(native.matches_template(filtering, filtering, opening))
 
+    def test_async_type_details_do_not_change_label_endpoint(self):
+        from PIL import Image
+        fixtures = Path(__file__).with_name('fixtures') / 'native'
+        warmup = Image.open(fixtures / 'zed-typescript-details-warmup.png')
+        resolved = Image.open(fixtures / 'zed-typescript-details-resolved.png')
+        filtered = Image.open(fixtures / 'zed-typescript-details-filtered.png')
+        # Actual failed CI frames: details start after the label at x=386.
+        self.assertNotEqual(warmup.tobytes(), resolved.tobytes())
+        label = (0, 0, 49, 18)
+        target = warmup.crop(label).tobytes()
+        stale = filtered.crop(label).tobytes()
+        self.assertTrue(native.matches_template(resolved.crop(label).tobytes(), target, stale))
+        # At the moved filtered label, opening pixels must still be rejected.
+        filtered_label = (9, 0, 58, 18)
+        filtered_target = filtered.crop(filtered_label).tobytes()
+        old_query = resolved.crop(filtered_label).tobytes()
+        self.assertFalse(native.matches_template(old_query, filtered_target, old_query))
+        self.assertTrue(native.matches_template(filtered_target, filtered_target, old_query))
+
     def test_stale_suggestions_and_partial_paints_do_not_match(self):
         self.assertFalse(native.matches_template(b'Array:Arr', b'Array:Arra', b'Array:Arr'))
         self.assertFalse(native.matches_template(b'Array:Arr?', b'Array:Arra', b'Array:Arr'))

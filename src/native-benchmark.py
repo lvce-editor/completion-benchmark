@@ -177,7 +177,7 @@ def run(root):
             key('h' if args.language == 'html' else 'a')
             time.sleep(.5)
             filtering, _, _ = capture(suffix='-filtering-warmup')
-            ocr(filtering, '-filtering-warmup')
+            filtered_rows = ocr(filtering, '-filtering-warmup')
             # Prove which completion the warmup menu represents. The exact copied
             # buffer is stronger than OCR (e.g. h1 vs hl); templates exclude caret.
             key('Return')
@@ -192,13 +192,24 @@ def run(root):
                 raise RuntimeError('Warmup undo did not restore the exact original fixture')
             row = min(matches, key=lambda value: (int(value[7]), int(value[6])))
             x, y, width, height = map(int, row[6:10])
-            # HTML a is the second row; include h1 in the new first row. The TS
-            # menu shifts by one glyph when the prefix grows; include both labels.
-            box = (x - 2, y - (30 if args.language == 'html' else 2), x + (60 if args.language == 'html' else width + 16), y + height + 2)
-            templates = [opening.crop(box).tobytes(), filtering.crop(box).tobytes()]
-            observation.matches_template(templates[1], templates[1], templates[0])
-            opening.crop(box).save(str(prefix) + '-opening-template.png')
-            filtering.crop(box).save(str(prefix) + '-filtering-template.png')
+            # Observe labels only: TypeScript resolve adds asynchronous type
+            # details to the right, which are not part of completion readiness.
+            box = (x - 2, y - (30 if args.language == 'html' else 2), x + (60 if args.language == 'html' else width + 2), y + height + 2)
+            boxes = [box, box]
+            if args.language == 'typescript':
+                filtered_matches = [value for value in filtered_rows if value[-1] == 'Array' and abs(int(value[7]) - y) < 3]
+                if not filtered_matches:
+                    raise RuntimeError('No filtered Array label for query-qualified template')
+                filtered_row = min(filtered_matches, key=lambda value: int(value[6]))
+                fx, fy, fw, fh = map(int, filtered_row[6:10])
+                boxes[1] = (fx - 2, fy - 2, fx + fw + 2, fy + fh + 2)
+            screens = [opening, filtering]
+            templates = [screen.crop(region).tobytes() for screen, region in zip(screens, boxes)]
+            stale_templates = [screens[1 - index].crop(region).tobytes() for index, region in enumerate(boxes)]
+            for index, template in enumerate(templates):
+                observation.matches_template(template, template, stale_templates[index])
+            opening.crop(boxes[0]).save(str(prefix) + '-opening-template.png')
+            filtering.crop(boxes[1]).save(str(prefix) + '-filtering-template.png')
             key('Escape')
             time.sleep(.2)
             calibration = []
@@ -207,8 +218,9 @@ def run(root):
                 calibration.append((end - start) / 1e6)
             samples = []
             for index, (action, phase) in enumerate([('ctrl+space', 'opening'), ('h' if args.language == 'html' else 'a', 'filtering')]):
+                box = boxes[index]
                 target = templates[index]
-                stale = templates[1 - index]
+                stale = stale_templates[index]
                 before, _, _ = capture(box)
                 if observation.matches_template(before.tobytes(), target, stale):
                     raise RuntimeError('Pre-action screen already matches the target template')
@@ -229,14 +241,14 @@ def run(root):
                     save_json('-' + phase + '-timeout.json', {'injection': injection, 'frames': frames})
                     raise RuntimeError('Query-qualified template timeout: ' + phase)
                 capture(suffix='-' + phase + '-measured')
-                samples.append({'phase': phase, 'injection': injection, 'frames': frames, **observation.timing_bounds(injection, frames)})
+                samples.append({'phase': phase, 'region': box, 'injection': injection, 'frames': frames, **observation.timing_bounds(injection, frames)})
             # Revalidate the actual timed filter's completion, without retrying it.
             key('Return')
             confirm_buffer(accepted)
             result = {
                 'status': 'passed', 'warmupRequests': requests,
                 'openingMs': samples[0]['stableUpperMs'], 'filteringMs': samples[1]['stableUpperMs'],
-                'samples': samples, 'region': box, 'captureCalibrationMs': calibration,
+                'samples': samples, 'regions': boxes, 'captureCalibrationMs': calibration,
                 'templateSha256': [hashlib.sha256(template).hexdigest() for template in templates],
                 'confirmedText': accepted, 'profile': str(root), 'settings': settings,
                 'clock': 'Python monotonic_ns for XTest submission/round-trip and XGetImage brackets',
