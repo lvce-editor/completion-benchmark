@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "version": "v0.121.19",
+  "sha256": "f2233c978e9e1a9b247b7f3ab8354b7746687c68f1af4dfda97837f2388877f2",
+  "checks": [
+    "continued typing displays fresh alp highlights",
+    "empty results remove items and highlights",
+    "backspace restores matching items and query highlights",
+    "dismiss and reopen preserves current query",
+    "keyboard selection and Enter accept the selected item",
+    "Unicode word boundary clears prior highlights, matching the control",
+    "Unicode label filtering restores café with caf highlights",
+    "Unicode completion acceptance preserves café"
+  ]
+}

@@ -1,0 +1,955 @@
+{
+  "method": "Trusted filtering keydown to query-qualified matching row through two animation frames; independent launch samples; nearest-rank p95; tracing excluded from latency",
+  "summary": {
+    "control": {
+      "html": {
+        "n": 5,
+        "medianMs": 77.65000000596046,
+        "p95Ms": 95.0949999988079
+      },
+      "typescript": {
+        "n": 5,
+        "medianMs": 77.43000000715256,
+        "p95Ms": 79.0949999988079
+      }
+    },
+    "candidate": {
+      "html": {
+        "n": 5,
+        "medianMs": 61.75499999523163,
+        "p95Ms": 68.98000000417233
+      },
+      "typescript": {
+        "n": 5,
+        "medianMs": 61.65500000119209,
+        "p95Ms": 75.03499999642372
+      }
+    },
+    "comparison": {
+      "html": {
+        "n": 5,
+        "medianMs": 46.6000000089407,
+        "p95Ms": 61
+      },
+      "typescript": {
+        "n": 5,
+        "medianMs": 43.5,
+        "p95Ms": 49.20000000298023
+      }
+    }
+  },
+  "records": {
+    "control": {
+      "metadata": {
+        "platform": "linux",
+        "architecture": "x64",
+        "node": "v24.15.0",
+        "host": {
+          "cpu": "AMD EPYC-Rome Processor",
+          "cpuCount": 8,
+          "memoryBytes": 16366850048,
+          "kernel": "7.0.0-38-generic"
+        },
+        "run": {
+          "timestamp": "2026-10-10T00:34:20.236Z",
+          "commit": null,
+          "id": null
+        },
+        "measurement": {
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          },
+          "gpu": false,
+          "warmup": "successful discarded request; bounded startup readiness retries",
+          "endpoint": "query-qualified DOM through two animation frames",
+          "filtering": "live open-list update including provider work",
+          "vscodeQuickSuggestions": false
+        },
+        "lvce": {
+          "version": "v0.121.18",
+          "sha256": "8ea713b360e7ea7b50132925a869fff2d2c21c7e32141dd4130365ab531e2367",
+          "htmlProvider": "bundled with LVCE release",
+          "typescriptProvider": "5.25.3",
+          "typescriptProviderSha256": "10024d377313f2b811ab1242f387e57ea46ff3dc0a69dbeba4ac1f842557b097",
+          "completionsOnType": true
+        },
+        "vscode": {
+          "version": "1.136.2",
+          "sha256": "2bab551c3677d33010e317a7845e61d2f0fa0c80f8518399c42e0f941f64f18f",
+          "htmlProvider": "10.0.0",
+          "typescriptProvider": "10.0.0"
+        },
+        "fixtures": {
+          "html": "html/index.html",
+          "typescript": "typescript/index.ts",
+          "revision": 2,
+          "sha256": {
+            "html": "5bd30a19d3ade6fe6b3dce5cb0a1c930991ed31d9c952389365e37daada13b78",
+            "typescript": "209532da44acffa0f794162dfa5ec0d8d5c757773f3439d0fbdd0f0267484a0e"
+          }
+        }
+      },
+      "trials": [
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 184.9399999976158,
+          "filteringMs": 73.81499999761581,
+          "observations": {
+            "opening": {
+              "milliseconds": 184.9399999976158,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 73.81499999761581,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 184.61500000953674,
+          "filteringMs": 77.48499999940395,
+          "observations": {
+            "opening": {
+              "milliseconds": 184.61500000953674,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 77.48499999940395,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 167.3800000101328,
+          "filteringMs": 79.73499999940395,
+          "observations": {
+            "opening": {
+              "milliseconds": 167.3800000101328,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 79.73499999940395,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 185.32500000298023,
+          "filteringMs": 95.0949999988079,
+          "observations": {
+            "opening": {
+              "milliseconds": 185.32500000298023,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 95.0949999988079,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 188.23499999940395,
+          "filteringMs": 77.65000000596046,
+          "observations": {
+            "opening": {
+              "milliseconds": 188.23499999940395,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 77.65000000596046,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-5-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 158.95000000298023,
+          "filteringMs": 77.14499999582767,
+          "observations": {
+            "opening": {
+              "milliseconds": 158.95000000298023,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 77.14499999582767,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 142.45000000298023,
+          "filteringMs": 77.8200000077486,
+          "observations": {
+            "opening": {
+              "milliseconds": 142.45000000298023,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 77.8200000077486,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 146.84999999403954,
+          "filteringMs": 76.81999999284744,
+          "observations": {
+            "opening": {
+              "milliseconds": 146.84999999403954,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 76.81999999284744,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 3,
+          "openingMs": 190.25,
+          "filteringMs": 79.0949999988079,
+          "observations": {
+            "opening": {
+              "milliseconds": 190.25,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 79.0949999988079,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 111.71499998867512,
+          "filteringMs": 77.43000000715256,
+          "observations": {
+            "opening": {
+              "milliseconds": 111.71499998867512,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 77.43000000715256,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-5-latency.png",
+          "trace": null
+        }
+      ]
+    },
+    "candidate": {
+      "metadata": {
+        "platform": "linux",
+        "architecture": "x64",
+        "node": "v24.15.0",
+        "host": {
+          "cpu": "AMD EPYC-Rome Processor",
+          "cpuCount": 8,
+          "memoryBytes": 16366850048,
+          "kernel": "7.0.0-38-generic"
+        },
+        "run": {
+          "timestamp": "2026-10-10T00:34:20.236Z",
+          "commit": null,
+          "id": null
+        },
+        "measurement": {
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          },
+          "gpu": false,
+          "warmup": "successful discarded request; bounded startup readiness retries",
+          "endpoint": "query-qualified DOM through two animation frames",
+          "filtering": "live open-list update including provider work",
+          "vscodeQuickSuggestions": false
+        },
+        "lvce": {
+          "version": "v0.121.19",
+          "sha256": "f2233c978e9e1a9b247b7f3ab8354b7746687c68f1af4dfda97837f2388877f2",
+          "htmlProvider": "bundled with LVCE release",
+          "typescriptProvider": "5.25.3",
+          "typescriptProviderSha256": "10024d377313f2b811ab1242f387e57ea46ff3dc0a69dbeba4ac1f842557b097",
+          "completionsOnType": true
+        },
+        "vscode": {
+          "version": "1.141.0",
+          "sha256": "d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a",
+          "htmlProvider": "10.0.0",
+          "typescriptProvider": "10.0.0"
+        },
+        "fixtures": {
+          "html": "html/index.html",
+          "typescript": "typescript/index.ts",
+          "revision": 2,
+          "sha256": {
+            "html": "5bd30a19d3ade6fe6b3dce5cb0a1c930991ed31d9c952389365e37daada13b78",
+            "typescript": "209532da44acffa0f794162dfa5ec0d8d5c757773f3439d0fbdd0f0267484a0e"
+          }
+        }
+      },
+      "trials": [
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 209.18000000715256,
+          "filteringMs": 68.98000000417233,
+          "observations": {
+            "opening": {
+              "milliseconds": 209.18000000715256,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 68.98000000417233,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 174.45499999821186,
+          "filteringMs": 60.375,
+          "observations": {
+            "opening": {
+              "milliseconds": 174.45499999821186,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 60.375,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 186.98499999940395,
+          "filteringMs": 61.82999999821186,
+          "observations": {
+            "opening": {
+              "milliseconds": 186.98499999940395,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 61.82999999821186,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 193.5700000077486,
+          "filteringMs": 61.75499999523163,
+          "observations": {
+            "opening": {
+              "milliseconds": 193.5700000077486,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 61.75499999523163,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "html",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 218.9699999988079,
+          "filteringMs": 58.95499999821186,
+          "observations": {
+            "opening": {
+              "milliseconds": 218.9699999988079,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 58.95499999821186,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-html-5-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 3,
+          "openingMs": 132.87000000476837,
+          "filteringMs": 75.03499999642372,
+          "observations": {
+            "opening": {
+              "milliseconds": 132.87000000476837,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 75.03499999642372,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 120.40000000596046,
+          "filteringMs": 60.00499999523163,
+          "observations": {
+            "opening": {
+              "milliseconds": 120.40000000596046,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 60.00499999523163,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 4,
+          "openingMs": 109.93999999761581,
+          "filteringMs": 62.11500000953674,
+          "observations": {
+            "opening": {
+              "milliseconds": 109.93999999761581,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 62.11500000953674,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 3,
+          "openingMs": 138.29999999701977,
+          "filteringMs": 43.73499999940395,
+          "observations": {
+            "opening": {
+              "milliseconds": 138.29999999701977,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 43.73499999940395,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "lvce",
+          "language": "typescript",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 3,
+          "openingMs": 141.6899999976158,
+          "filteringMs": 61.65500000119209,
+          "observations": {
+            "opening": {
+              "milliseconds": 141.6899999976158,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 61.65500000119209,
+              "row": "ArrayBufferConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "lvce-typescript-5-latency.png",
+          "trace": null
+        }
+      ]
+    },
+    "comparison": {
+      "metadata": {
+        "platform": "linux",
+        "architecture": "x64",
+        "node": "v24.15.0",
+        "host": {
+          "cpu": "AMD EPYC-Rome Processor",
+          "cpuCount": 8,
+          "memoryBytes": 16366850048,
+          "kernel": "7.0.0-38-generic"
+        },
+        "run": {
+          "timestamp": "2026-10-10T00:34:20.236Z",
+          "commit": null,
+          "id": null
+        },
+        "measurement": {
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          },
+          "gpu": false,
+          "warmup": "successful discarded request; bounded startup readiness retries",
+          "endpoint": "query-qualified DOM through two animation frames",
+          "filtering": "live open-list update including provider work",
+          "vscodeQuickSuggestions": false
+        },
+        "lvce": {
+          "version": "v0.121.18",
+          "sha256": "8ea713b360e7ea7b50132925a869fff2d2c21c7e32141dd4130365ab531e2367",
+          "htmlProvider": "bundled with LVCE release",
+          "typescriptProvider": "5.25.3",
+          "typescriptProviderSha256": "10024d377313f2b811ab1242f387e57ea46ff3dc0a69dbeba4ac1f842557b097",
+          "completionsOnType": true
+        },
+        "vscode": {
+          "version": "1.141.0",
+          "sha256": "d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a",
+          "htmlProvider": "10.0.0",
+          "typescriptProvider": "10.0.0"
+        },
+        "fixtures": {
+          "html": "html/index.html",
+          "typescript": "typescript/index.ts",
+          "revision": 2,
+          "sha256": {
+            "html": "5bd30a19d3ade6fe6b3dce5cb0a1c930991ed31d9c952389365e37daada13b78",
+            "typescript": "209532da44acffa0f794162dfa5ec0d8d5c757773f3439d0fbdd0f0267484a0e"
+          }
+        }
+      },
+      "trials": [
+        {
+          "editor": "vscode",
+          "language": "html",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 61.79999999701977,
+          "filteringMs": 61,
+          "observations": {
+            "opening": {
+              "milliseconds": 61.79999999701977,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 61,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-html-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "html",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 149.19999998807907,
+          "filteringMs": 46.6000000089407,
+          "observations": {
+            "opening": {
+              "milliseconds": 149.19999998807907,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 46.6000000089407,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-html-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "html",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 85.29999999701977,
+          "filteringMs": 60.29999999701977,
+          "observations": {
+            "opening": {
+              "milliseconds": 85.29999999701977,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 60.29999999701977,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-html-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "html",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 151.79999999701977,
+          "filteringMs": 29.600000008940697,
+          "observations": {
+            "opening": {
+              "milliseconds": 151.79999999701977,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 29.600000008940697,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-html-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "html",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 83.80000001192093,
+          "filteringMs": 43.80000001192093,
+          "observations": {
+            "opening": {
+              "milliseconds": 83.80000001192093,
+              "row": "a",
+              "highlight": ""
+            },
+            "filtering": {
+              "milliseconds": 43.80000001192093,
+              "row": "h1",
+              "highlight": "h"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-html-5-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "typescript",
+          "repeat": 0,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 139.69999998807907,
+          "filteringMs": 31.299999997019768,
+          "observations": {
+            "opening": {
+              "milliseconds": 139.69999998807907,
+              "row": "Array",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 31.299999997019768,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-typescript-1-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "typescript",
+          "repeat": 1,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 206,
+          "filteringMs": 32.900000005960464,
+          "observations": {
+            "opening": {
+              "milliseconds": 206,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 32.900000005960464,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-typescript-2-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "typescript",
+          "repeat": 2,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 95.79999999701977,
+          "filteringMs": 48.400000005960464,
+          "observations": {
+            "opening": {
+              "milliseconds": 95.79999999701977,
+              "row": "Array",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 48.400000005960464,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-typescript-3-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "typescript",
+          "repeat": 3,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 168.59999999403954,
+          "filteringMs": 43.5,
+          "observations": {
+            "opening": {
+              "milliseconds": 168.59999999403954,
+              "row": "Array",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 43.5,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-typescript-4-latency.png",
+          "trace": null
+        },
+        {
+          "editor": "vscode",
+          "language": "typescript",
+          "repeat": 4,
+          "phase": "latency",
+          "status": "passed",
+          "warmupRequests": 1,
+          "openingMs": 103.5,
+          "filteringMs": 49.20000000298023,
+          "observations": {
+            "opening": {
+              "milliseconds": 103.5,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arr"
+            },
+            "filtering": {
+              "milliseconds": 49.20000000298023,
+              "row": "Arrayinterface Array<T>var Array: ArrayConstructor",
+              "highlight": "Arra"
+            }
+          },
+          "render": null,
+          "screenshot": "vscode-typescript-5-latency.png",
+          "trace": null
+        }
+      ]
+    }
+  }
+}

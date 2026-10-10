@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { chromium } from 'playwright'
-import { armCompletion, collectCompletion, warmCompletion } from '../src/readiness.ts'
+import { armCompletion, closeCompletions, collectCompletion, warmCompletion } from '../src/readiness.ts'
 
 test('renderer observation rejects stale rows and observes trusted keys through two frames', async () => {
   const browser = await chromium.launch()
@@ -45,7 +45,14 @@ test('warmup waits for provider registration without retrying a measured interac
     await page.locator('textarea').focus()
     await page.evaluate(() => {
       let requests = 0
+      // Model a busy renderer: two observation frames take longer than 100 ms.
+      window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 100)
+      window.cancelAnimationFrame = (handle) => window.clearTimeout(handle)
       document.addEventListener('keydown', (event) => {
+        if (event.code === 'Escape') {
+          document.querySelector('.EditorCompletionItem')?.remove()
+          return
+        }
         if (event.code !== 'Space' || !event.ctrlKey) return
         if (++requests === 2) {
           const row = document.createElement('div')
@@ -55,6 +62,8 @@ test('warmup waits for provider registration without retrying a measured interac
         }
       })
     })
-    assert.equal(await warmCompletion(page, 'lvce', 'Array', 2000, 100), 2)
+    assert.equal(await warmCompletion(page, 'lvce', 'Array', 5000, 1000), 2)
+    await closeCompletions(page, 'lvce')
+    assert.equal(await page.locator('.EditorCompletionItem').count(), 0)
   } finally { await browser.close() }
 })
