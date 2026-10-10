@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
+import { processInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
@@ -66,6 +67,9 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   const root = await mkdtemp(join(tmpdir(), `completion-benchmark-${editor}-${language}-`))
   const env = { ...process.env, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(root, 'data'), XDG_CACHE_HOME: join(root, 'cache'), XDG_STATE_HOME: join(root, 'state') }
   await Promise.all([env.XDG_CONFIG_HOME, env.XDG_DATA_HOME, env.XDG_CACHE_HOME, env.XDG_STATE_HOME].map((path) => mkdir(path, { recursive: true })))
+  const preload = join(root, 'process-instrumentation.cjs')
+  const inspectorInventory = join(root, 'process-inspectors.jsonl')
+  if (profiling) await writeFile(preload, processInstrumentation)
   const userData = join(root, 'profile')
   await mkdir(join(userData, 'User'), { recursive: true })
   await writeFile(join(userData, 'User/settings.json'), JSON.stringify({ 'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off', 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'editor.minimap.enabled': false, 'editor.quickSuggestions': false }))
@@ -110,6 +114,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       await Promise.race([new Promise<void>((done) => child.once('exit', () => done())), delay(1000)])
       try { process.kill(-child.pid, 'SIGKILL') } catch { /* The process group has exited. */ }
     }
+    if (profiling) await cp(inspectorInventory, `${outputPrefix}-backend-inspectors.jsonl`).catch(() => {})
     await writeFile(`${outputPrefix}.log`, log)
     await cp(join(userData, 'logs'), `${outputPrefix}-logs`, { recursive: true }).catch(() => {})
     await rm(root, { recursive: true, force: true })
@@ -133,27 +138,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       const paused = main.event('Debugger.paused')
       await main.send('Runtime.runIfWaitingForDebugger')
       await paused
-      const instrumented = await main.send('Runtime.evaluate', { expression: `(()=>{
-        const load=process.getBuiltinModule?.('module').createRequire(process.cwd()+'/completion-benchmark.cjs');
-        if(!load) throw new Error('Node module loader unavailable for process instrumentation');
-        const electron=load('electron');
-        globalThis.__completionBenchmarkProcesses=[];
-        const original=electron.utilityProcess?.fork;
-        if(typeof original!=='function') throw new Error('Electron utilityProcess.fork is unavailable');
-        const instrument=(original,kind)=>function(file,args,options={}){
-          if(!Array.isArray(args)){options=args||{};args=undefined}
-          const child=original.call(this,file,args,{...options,execArgv:[...(options.execArgv||process.execArgv).filter(x=>!x.startsWith('--inspect')),'--inspect=0']});
-          const record={pid:0,file,kind,alive:true};
-          child.on('spawn',()=>{record.pid=child.pid;globalThis.__completionBenchmarkProcesses.push(record)});
-          child.on('exit',()=>record.alive=false);
-          child.stderr?.on('data',data=>process.stderr.write(data));
-          return child;
-        };
-        electron.utilityProcess.fork=instrument(original,'utility');
-        const childProcess=load('node:child_process');
-        if(typeof childProcess.fork==='function') childProcess.fork=instrument(childProcess.fork,'fork');
-        return true;
-      })()`, returnByValue: true })
+      const instrumented = await main.send('Runtime.evaluate', { expression: `(()=>{ const load=process.getBuiltinModule('module').createRequire(process.cwd()+'/completion-benchmark.cjs'); load(${JSON.stringify(preload)}); return true; })()`, returnByValue: true })
       if (instrumented.exceptionDetails || instrumented.result.value !== true) throw new Error(`Inspector process instrumentation failed: ${JSON.stringify(instrumented)}`)
       await main.send('Debugger.resume')
       await main.send('Debugger.disable')
@@ -189,7 +174,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       await writeFile(`${outputPrefix}-focus-failure.json`, JSON.stringify(active, null, 2)).catch(() => {})
       throw new Error('Editor input did not receive focus')
     }
-    return { page, browser, close, editor, language, main, inspectorUrls: () => [...new Set([...log.matchAll(/Debugger listening on (ws:\/\/[^\s]+)/g)].map((match) => match[1]))] }
+    return { page, browser, close, editor, language, main, inspectorInventory }
   } catch (error) {
     await close()
     throw error
@@ -287,22 +272,34 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
     if (!Number.isSafeInteger(mainInfo?.pid)) throw new Error('Could not identify the Electron main process')
     sessions.push({ session: app.main, side: 'backend', identity: { role: 'main', ...mainInfo } })
     profilerStage = 'inventory backend processes'
-    const beforeProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number; file: string; kind: string; alive: boolean }[]
-    const attachedPids = new Set([mainInfo.pid])
-    const inaccessible: string[] = []
-    for (const url of app.inspectorUrls().slice(1)) {
-      let session: Protocol | undefined
-      try {
-        session = await Protocol.connect(url)
-        const info = (await session.send('Runtime.evaluate', { expression: '({pid:process.pid,argv:process.argv})', returnByValue: true })).result.value
-        if (!beforeProcesses.some((process) => process.pid === info.pid) || attachedPids.has(info.pid)) { session.close(); continue }
-        attachedPids.add(info.pid)
-        const process = beforeProcesses.find((candidate) => candidate.pid === info.pid)!
-        sessions.push({ session, side: 'backend', identity: { role: process.kind, file: process.file, ...info }, owned: session })
-      } catch (error) { session?.close(); inaccessible.push(String(error)) }
+    const inventory = async () => {
+      const records = parseInspectorProcesses(await readFile(app.inspectorInventory, 'utf8'))
+      const live = []
+      for (const record of records) {
+        try { await readFile(`/proc/${record.pid}/stat`, 'utf8'); live.push(record) } catch { /* Exited before capture. */ }
+      }
+      const descendants = await descendantsOf(mainInfo.pid)
+      const uncovered = []
+      for (const pid of descendants) {
+        try {
+          const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean)
+          const chromiumType = argv.find((arg) => arg.startsWith('--type='))
+          const nodeBackend = chromiumType ? argv.includes('--utility-sub-type=node.mojom.NodeService') : argv.some((arg) => /\.(?:c?js|mjs)$/.test(arg))
+          if (nodeBackend && !live.some((record) => record.pid === pid)) uncovered.push({ pid, argv })
+        } catch { /* A process exited during the snapshot. */ }
+      }
+      if (uncovered.length) throw new Error(`Uninstrumented backend descendants: ${JSON.stringify(uncovered)}`)
+      return live.filter((record) => record.pid !== mainInfo.pid)
     }
-    const uncovered = beforeProcesses.filter((process) => !attachedPids.has(process.pid))
-    if (uncovered.length) throw new Error(`Missing backend inspector coverage: ${JSON.stringify({ beforeProcesses, attachedPids: [...attachedPids], inaccessible, uncovered })}`)
+    const beforeProcesses = await inventory()
+    record('backend inventory', { label: 'before capture', processes: beforeProcesses })
+    if (app.editor === 'vscode' && app.language === 'typescript' && !beforeProcesses.some((record) => record.argv.some((arg) => arg.endsWith('/tsserver.js')))) throw new Error('Missing VS Code tsserver backend coverage')
+    for (const process of beforeProcesses) {
+      const session = await Protocol.connect(process.url)
+      sessions.push({ session, side: 'backend', identity: { ...process, file: process.argv.find((arg) => /\.(?:c?js|mjs)$/.test(arg)) }, owned: session })
+      const actual = (await session.send('Runtime.evaluate', { expression: 'process.pid', returnByValue: true })).result.value
+      if (actual !== process.pid) throw new Error(`Backend inspector PID mismatch: expected ${process.pid}, got ${actual}`)
+    }
     if (!sessions.some((entry) => entry.side === 'frontend' && entry.identity.type === 'worker') && app.editor === 'lvce') throw new Error('Missing LVCE frontend worker coverage')
     for (const entry of sessions) {
       profilerStage = `enable profiler for ${entry.side} ${JSON.stringify(entry.identity)}`
@@ -332,7 +329,8 @@ async function captureProfileWorkload(app: Awaited<ReturnType<typeof launch>>, p
     captureEndedAt = new Date().toISOString()
     record('capture end', { captureEndedAt })
     assertProfileTargetMembership(beforeTargets.map((target) => target.targetId), afterTargets.map((target: any) => target.targetId), targetChanges, captureStart, captureEnd)
-    const afterProcesses = (await app.main.send('Runtime.evaluate', { expression: 'globalThis.__completionBenchmarkProcesses.filter(x=>x.alive)', returnByValue: true })).result.value as { pid: number }[]
+    const afterProcesses = await inventory()
+    record('backend inventory', { label: 'interaction endpoint', processes: afterProcesses })
     if (beforeProcesses.map((process) => process.pid).sort().join() !== afterProcesses.map((process) => process.pid).sort().join()) throw new Error(`Profiler backend membership changed during interaction: ${JSON.stringify({ beforeProcesses, afterProcesses })}`)
     const profiles: JavaScriptProfile[] = []
     for (const [index, entry] of sessions.entries()) {
