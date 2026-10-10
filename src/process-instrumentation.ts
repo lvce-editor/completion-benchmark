@@ -30,6 +30,21 @@ if (process.type === 'browser' && process.env.COMPLETION_BENCHMARK_LEGACY_ELECTR
 
 export interface InspectorProcess { pid: number; parentPid: number; argv: string[]; role: string; url: string }
 
+// Atom's BufferedNodeProcess spawns Electron in Node mode from the renderer.
+// Instrument those children before provider activation without opening a Node
+// inspector in the Chromium renderer itself.
+export const atomRendererInstrumentation = String.raw`
+const childProcess = require('child_process');
+const path = require('path');
+const spawn = childProcess.spawn;
+childProcess.spawn = function(file, args, options = {}) {
+  if (file === process.execPath && (options.env || process.env).ELECTRON_RUN_AS_NODE) {
+    args = ['--inspect=0', '--require=' + path.join(__dirname, 'process-instrumentation.cjs'), ...args];
+  }
+  return spawn.call(this, file, args, options);
+};
+`
+
 export function parseInspectorProcesses(text: string): InspectorProcess[] {
   const records = text.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as InspectorProcess)
   if (records.some((record) => !Number.isSafeInteger(record.pid) || record.pid < 1 || !record.url?.startsWith('ws://') || !Array.isArray(record.argv))) throw new Error('Malformed backend inspector inventory')

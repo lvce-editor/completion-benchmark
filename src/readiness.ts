@@ -2,7 +2,7 @@ import type { Page } from 'playwright'
 
 export const completionUi = (editor: 'lvce' | 'vscode' | 'atom' | 'theia') => editor === 'lvce'
   ? { input: '.EditorInput textarea', rows: '.EditorCompletionItem', highlights: '.EditorCompletionItemHighlight' }
-  : editor === 'atom' ? { input: 'atom-text-editor:not([mini]) .hidden-input', rows: 'autocomplete-suggestion-list li', highlights: '.character-match' }
+  : editor === 'atom' ? { input: 'atom-text-editor:not([mini]) .hidden-input', rows: 'autocomplete-suggestion-list li .word', highlights: '.character-match' }
   : editor === 'theia' ? { input: '.theia-editor .monaco-editor .native-edit-context, .theia-editor .monaco-editor textarea.inputarea', rows: '.suggest-widget .monaco-list-row', highlights: '.suggest-widget .highlight' }
   // Modern Monaco uses EditContext. Its readonly IME textarea is not the editor input.
   : { input: '#workbench\\.parts\\.editor .monaco-editor .native-edit-context, #workbench\\.parts\\.editor .monaco-editor textarea.inputarea', rows: '.suggest-widget .monaco-list-row', highlights: '.suggest-widget .highlight' }

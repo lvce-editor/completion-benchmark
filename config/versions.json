@@ -44,5 +44,18 @@
     "url": "https://download.eclipse.org/theia/ide/1.76.0/linux/TheiaIDE.deb",
     "sha256": "92e46d9396ac96b6d9db11249440b2edd1084e8c5511272f4abf3fb6a9c570b5",
     "binary": "opt/TheiaIDE/theia-ide-electron-app.bin"
+  },
+  "zed": {
+    "version": "1.23.2",
+    "asset": "zed-linux-x86_64-1.23.2.tar.gz",
+    "url": "https://github.com/zed-industries/zed/releases/download/v1.23.2/zed-linux-x86_64.tar.gz",
+    "sha256": "cabddd5af2b26a19633ea39f5dde070e2aad204bb815bfa74cb65073ffd5ff39",
+    "binary": "zed.app/libexec/zed-editor",
+    "htmlExtension": {
+      "version": "0.3.2",
+      "asset": "zed-html-0.3.2.tar.gz",
+      "url": "https://api.zed.dev/extensions/html/0.3.2/download",
+      "sha256": "92a5f672be05f3c1e5cd9c316c1758a5bd464de0284235311057c7662c5e201f"
+    }
   }
 }

@@ -75,13 +75,16 @@ for (const editor of ['atom', 'theia'] as const) {
       const page = await browser.newPage()
       const atom = editor === 'atom'
       await page.setContent(atom
-        ? '<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li>Array<span class="character-match">Arr</span></li></ol></autocomplete-suggestion-list>'
+        ? '<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li><span class="left-label">var</span><span class="word"><span class="character-match">Arr</span>ay</span></li></ol></autocomplete-suggestion-list>'
         : '<div class="theia-editor"><div class="monaco-editor"><textarea class="inputarea"></textarea></div></div><div class="suggest-widget"><div class="monaco-list-row">Array<span class="highlight">Arr</span></div></div>')
       await page.focus(atom ? 'input' : 'textarea')
       await armCompletion(page, editor, 'Array', 'KeyA', 'Arra', { timeoutMs: 1000 })
       await page.keyboard.press('a')
       await assert.rejects(collectCompletion(page), /Completion timeout.*trusted key observed/)
-      await page.locator(atom ? '.character-match' : '.highlight').evaluate((node) => { node.textContent = 'Arra' })
+      await page.locator(atom ? '.character-match' : '.highlight').evaluate((node) => {
+        node.textContent = 'Arra'
+        if (node.parentElement?.classList.contains('word') && node.nextSibling) node.nextSibling.textContent = 'y'
+      })
       await armCompletion(page, editor, 'Array', 'KeyA', 'Arra', { timeoutMs: 1000 })
       await page.keyboard.press('a')
       const result = await collectCompletion(page)
@@ -95,7 +98,7 @@ test('Atom waits for asynchronous Escape dismissal without reopening its list', 
   const browser = await chromium.launch()
   try {
     const page = await browser.newPage()
-    await page.setContent('<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li>a</li></ol></autocomplete-suggestion-list>')
+    await page.setContent('<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li><span class="word">a</span></li></ol></autocomplete-suggestion-list>')
     await page.focus('input')
     await page.evaluate(() => {
       document.addEventListener('keydown', (event) => {

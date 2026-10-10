@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { brotliDecompressSync } from 'node:zlib'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { cpus, totalmem, release } from 'node:os'
@@ -102,6 +102,39 @@ if (compilerManifest.version !== atomCompiler.version) throw new Error('Unexpect
 added.atom.typescriptProviderSha256 = atomTs.sha256
 added.atom.typescriptCompiler = atomCompiler.version
 added.atom.typescriptCompilerSha256 = atomCompiler.sha256
+
+const zed = versions.zed
+const zedRoot = join(apps, 'zed')
+await download(zed.url, join(apps, zed.asset), zed.sha256)
+await rm(zedRoot, { recursive: true, force: true })
+await mkdir(zedRoot, { recursive: true })
+run('tar', ['-xzf', join(apps, zed.asset), '-C', zedRoot])
+const zedBinary = join(zedRoot, zed.binary)
+const zedVersion = spawnSync(join(zedRoot, 'zed.app/bin/zed'), ['--version'], { encoding: 'utf8' })
+if (zedVersion.status !== 0 || !zedVersion.stdout.includes(` ${zed.version} `)) throw new Error(`Unexpected Zed version: ${zedVersion.stdout} ${zedVersion.stderr}`)
+const zedHtml = zed.htmlExtension
+await download(zedHtml.url, join(apps, zedHtml.asset), zedHtml.sha256)
+const zedHtmlRoot = join(apps, 'zed-html')
+await rm(zedHtmlRoot, { recursive: true, force: true })
+await mkdir(zedHtmlRoot, { recursive: true })
+run('tar', ['-xzf', join(apps, zedHtml.asset), '-C', zedHtmlRoot])
+if (!(await readFile(join(zedHtmlRoot, 'extension.toml'), 'utf8')).includes(`version = "${zedHtml.version}"`)) throw new Error('Unexpected Zed HTML extension')
+const zedProviders = join(apps, 'zed-lsp')
+await mkdir(zedProviders, { recursive: true })
+await cp('config/zed-providers/package.json', join(zedProviders, 'package.json'))
+await cp('config/zed-providers/package-lock.json', join(zedProviders, 'package-lock.json'))
+run('npm', ['ci', '--prefix', zedProviders, '--ignore-scripts', '--no-audit', '--no-fund'])
+const zedProviderVersion = async (name: string) => JSON.parse(await readFile(join(zedProviders, 'node_modules', name, 'package.json'), 'utf8')).version
+added.zed = {
+  version: zed.version, binary: zedBinary, sha256: zed.sha256,
+  htmlExtension: zedHtml.version, htmlExtensionSha256: zedHtml.sha256,
+  htmlProvider: await zedProviderVersion('@zed-industries/vscode-langservers-extracted'),
+  typescriptProvider: await zedProviderVersion('typescript-language-server'),
+  typescriptCompiler: await zedProviderVersion('typescript'),
+  providerLockSha256: createHash('sha256').update(await readFile('config/zed-providers/package-lock.json')).digest('hex'),
+  measurement: 'XTest injection bracket to two matching X11 screen captures; separate from renderer latency',
+  unsupported: ['Chromium paint', 'CSS style recalculation', 'JavaScript CPU profiling'],
+}
 
 await rm(fixture, { recursive: true, force: true })
 await mkdir(join(fixture, 'html'), { recursive: true })

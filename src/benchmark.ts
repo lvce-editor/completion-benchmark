@@ -8,18 +8,19 @@ import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
 import atomPlaywright from 'playwright-core-atom'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
-import { processInstrumentation, utilityBootstrap, parseInspectorProcesses } from './process-instrumentation.ts'
+import { processInstrumentation, utilityBootstrap, atomRendererInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode' | 'atom' | 'theia'
+type AllEditorId = EditorId | 'zed'
 type Language = 'html' | 'typescript'
 interface Trial {
-  editor: EditorId
+  editor: AllEditorId
   language: Language
   repeat: number
-  phase: 'latency' | 'render' | 'profile'
+  phase: 'latency' | 'render' | 'profile' | 'native-latency'
   status: 'passed' | 'failed'
   openingMs: number | null
   filteringMs: number | null
@@ -30,6 +31,7 @@ interface Trial {
   warmupRequests?: number
   observations?: { opening: { row: string; highlight: string }; filtering: { row: string; highlight: string } }
   error?: string
+  native?: { openingMs: number; filteringMs: number; [key: string]: unknown }
 }
 
 interface JavaScriptProfile { side: 'frontend' | 'backend'; identity: Record<string, unknown>; file: string; javascriptMs: number; idleMs: number; vmMs: number; samples: number; discardedSamples: number; durationMs: number }
@@ -37,9 +39,9 @@ interface JavaScriptProfile { side: 'frontend' | 'backend'; identity: Record<str
 const { values } = parseArgs({ options: {
   editor: { type: 'string' }, language: { type: 'string' }, repeats: { type: 'string', default: '3' }, output: { type: 'string', default: 'results' },
 } })
-const editors = (values.editor ? [values.editor] : ['lvce', 'vscode', 'atom', 'theia']) as EditorId[]
+const editors = (values.editor ? [values.editor] : ['lvce', 'vscode', 'atom', 'theia', 'zed']) as AllEditorId[]
 const languages = (values.language ? [values.language] : ['html', 'typescript']) as Language[]
-if (editors.some((editor) => !['lvce', 'vscode', 'atom', 'theia'].includes(editor))) throw new Error('--editor must be lvce, vscode, atom or theia')
+if (editors.some((editor) => !['lvce', 'vscode', 'atom', 'theia', 'zed'].includes(editor))) throw new Error('--editor must be lvce, vscode, atom, theia or zed')
 if (languages.some((language) => !['html', 'typescript'].includes(language))) throw new Error('--language must be html or typescript')
 const repeats = Number(values.repeats)
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 20) throw new Error('--repeats must be between 1 and 20')
@@ -73,6 +75,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   if (profiling) {
     await writeFile(preload, processInstrumentation)
     await writeFile(join(root, 'utility-bootstrap.cjs'), utilityBootstrap)
+    await writeFile(join(root, 'atom-renderer-instrumentation.cjs'), atomRendererInstrumentation)
   }
   const userData = join(root, 'profile')
   await mkdir(join(userData, 'User'), { recursive: true })
@@ -81,7 +84,8 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     await writeFile(join(userData, 'User/keybindings.json'), JSON.stringify([{ key: 'ctrl+space', command: 'editor.action.triggerSuggest', when: 'editorTextFocus' }]))
   }
   const binary = setup[editor].binary
-  const workspace = resolve(`.tmp/fixture/${language}`)
+  const workspace = join(root, 'workspace')
+  await cp(resolve(`.tmp/fixture/${language}`), workspace, { recursive: true })
   const file = join(workspace, language === 'html' ? 'index.html' : 'index.ts')
   const args = ['--no-sandbox', '--disable-gpu', '--remote-debugging-port=0', ...(profiling ? ['--inspect-brk=0'] : []), `--user-data-dir=${userData}`]
   if (editor === 'lvce') {
@@ -99,7 +103,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     await mkdir(join(root, 'atom/packages'), { recursive: true })
     await cp('.tmp/apps/atom-typescript', join(root, 'atom/packages/atom-typescript'), { recursive: true })
     await writeFile(join(root, 'atom/config.cson'), '"*":\n  welcome:\n    showOnStartup: false\n  core:\n    disabledPackages: ["github", "autocomplete-snippets"]\n    telemetryConsent: "no"\n  "autocomplete-plus":\n    enableAutoActivation: false\n')
-    await writeFile(join(root, 'atom/init.js'), "atom.packages.activatePackage('atom-typescript');\n")
+    await writeFile(join(root, 'atom/init.js'), `${profiling ? `require(${JSON.stringify(join(root, 'atom-renderer-instrumentation.cjs'))});\n` : ''}atom.packages.activatePackage('atom-typescript');\n`)
     args.push(file)
   }
   if (editor === 'theia') {
@@ -512,10 +516,39 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
   }
 }
 
+async function measureNative(language: Language, repeat: number): Promise<Trial> {
+  const prefix = join(output, `zed-${language}-${repeat + 1}`)
+  let log = ''
+  let native: any
+  let interrupted = false
+  let stop: (() => void) | undefined
+  try {
+    const child = spawn('/usr/bin/python3', ['src/native-benchmark.py', '--language', language, '--prefix', prefix], { stdio: ['ignore', 'pipe', 'pipe'] })
+    stop = () => { interrupted = true; child.kill('SIGTERM') }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+    child.stdout.on('data', (data) => { log += data })
+    child.stderr.on('data', (data) => { log += data })
+    const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve) })
+    native = JSON.parse(await readFile(`${prefix}-native.json`, 'utf8'))
+    if (code !== 0 || native.status !== 'passed') throw new Error(native.error ?? `Native harness exited ${code}`)
+    return { editor: 'zed', language, repeat, phase: 'native-latency', status: 'passed', openingMs: null, filteringMs: null, render: null, trace: null, screenshot: basename(`${prefix}-filtering-measured.png`), warmupRequests: native.warmupRequests, native }
+  } catch (error) {
+    return { editor: 'zed', language, repeat, phase: 'native-latency', status: 'failed', openingMs: null, filteringMs: null, render: null, trace: null, screenshot: null, error: String(error) }
+  } finally {
+    if (stop) {
+      process.off('SIGINT', stop)
+      process.off('SIGTERM', stop)
+    }
+    await writeFile(`${prefix}-controller.log`, log)
+    if (interrupted) process.exit(130)
+  }
+}
+
 for (const editor of editors) for (const language of languages) for (let repeat = 0; repeat < repeats; repeat++) {
-  const latency = await measure(editor, language, repeat, 'latency')
+  const latency = editor === 'zed' ? await measureNative(language, repeat) : await measure(editor, language, repeat, 'latency')
   trials.push(latency)
-  if (latency.status === 'passed') {
+  if (latency.status === 'passed' && editor !== 'zed') {
     trials.push(await measure(editor, language, repeat, 'render'))
     trials.push(await measure(editor, language, repeat, 'profile'))
   }

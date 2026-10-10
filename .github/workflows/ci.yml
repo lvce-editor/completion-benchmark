@@ -24,6 +24,8 @@ jobs:
       - run: npm run lint
       - run: node node_modules/playwright/cli.js install --with-deps chromium
       - run: npm test
+      - run: sudo apt-get update && sudo apt-get install -y python3-pil
+      - run: python3 test/native-observation.test.py
   benchmark:
     name: Benchmark (${{ matrix.editor }}, ${{ matrix.language }})
     needs: check
@@ -32,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        editor: [lvce, vscode]
+        editor: [lvce, vscode, atom, theia, zed]
         language: [html, typescript]
     steps:
       - uses: actions/checkout@v4
@@ -42,10 +44,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node node_modules/playwright/cli.js install --with-deps chromium
-      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1 libvulkan1 mesa-vulkan-drivers python3-pil python3-xlib xdotool xclip tesseract-ocr dbus-x11 gnome-keyring
       - run: npm run setup
       - name: Measure completions
-        run: xvfb-run -a npm run benchmark -- --editor ${{ matrix.editor }} --language ${{ matrix.language }} --repeats ${{ github.event_name == 'pull_request' && '1' || '5' }} --output results/${{ matrix.editor }}-${{ matrix.language }}
+        run: xvfb-run -a -s "-screen 0 1280x900x24" npm run benchmark -- --editor ${{ matrix.editor }} --language ${{ matrix.language }} --repeats ${{ github.event_name == 'pull_request' && '1' || '5' }} --output results/${{ matrix.editor }}-${{ matrix.language }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
