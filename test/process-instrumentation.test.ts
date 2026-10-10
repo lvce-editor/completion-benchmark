@@ -72,3 +72,25 @@ test('Atom renderer spawn hook captures Node-mode children and their grandchildr
     assert.ok(!records.some((record) => record.argv.includes(parent)))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+
+test('Atom apm shell wrapper instruments its bundled Node and preserves arguments and environment', async () => {
+  const { atomRendererInstrumentation } = await import('../src/process-instrumentation.ts')
+  const root = await mkdtemp(join(tmpdir(), 'completion-atom-apm-'))
+  try {
+    await writeFile(join(root, 'process-instrumentation.cjs'), processInstrumentation)
+    const hook = join(root, 'renderer.cjs')
+    const wrapper = join(root, 'apm')
+    const cli = join(root, 'cli.cjs')
+    const parent = join(root, 'parent.cjs')
+    await writeFile(hook, atomRendererInstrumentation)
+    await writeFile(wrapper, `#!/bin/sh\nexec '${process.execPath}' '${cli}' "$@"\n`, { mode: 0o755 })
+    await writeFile(cli, `if(process.argv.slice(2).join(' ')!=='outdated --json' || process.env.APM_TEST!=='kept') process.exit(2); process.exit(0)`)
+    await writeFile(parent, `require(${JSON.stringify(hook)});require('child_process').spawn(${JSON.stringify(wrapper)},['outdated','--json'],{env:{...process.env,APM_TEST:'kept',NODE_OPTIONS:'--no-warnings'}}).on('exit',code=>process.exit(code))`)
+    const result = spawnSync(process.execPath, [parent], { timeout: 15000 })
+    assert.equal(result.status, 0, result.stderr.toString())
+    const records = parseInspectorProcesses(await readFile(join(root, 'process-inspectors.jsonl'), 'utf8'))
+    assert.equal(records.length, 1)
+    assert.ok(records[0].argv.includes(cli))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
