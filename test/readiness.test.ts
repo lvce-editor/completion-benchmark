@@ -111,3 +111,33 @@ test('Atom waits for asynchronous Escape dismissal without reopening its list', 
     assert.equal(await page.locator('autocomplete-suggestion-list').count(), 0)
   } finally { await browser.close() }
 })
+
+test('Theia file-opening waits until shell reveal installs its keyboard listeners', async () => {
+  const { waitTheiaWorkbench } = await import('../src/readiness.ts')
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent('<div class="theia-preload"></div><div class="theia-ApplicationShell"><div role="tablist"></div></div>')
+    let ready = false
+    const workbench = waitTheiaWorkbench(page).then(() => { ready = true })
+    // Trust/tablist presence alone must not release startup. A hidden preload
+    // still exists during the application's reveal animation.
+    await page.evaluate(() => { (document.querySelector('.theia-preload') as HTMLElement).style.display = 'none' })
+    await page.keyboard.press('Control+p')
+    assert.equal(ready, false)
+    await page.evaluate(() => {
+      document.querySelector('.theia-preload')!.remove()
+      document.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.code === 'KeyP') {
+          const input = document.createElement('input')
+          input.setAttribute('aria-label', 'Search files by name')
+          document.body.append(input)
+        }
+      })
+    })
+    await workbench
+    await page.keyboard.press('Control+p')
+    await page.getByRole('textbox', { name: 'Search files by name' }).fill('index.ts')
+    assert.equal(await page.getByRole('textbox').inputValue(), 'index.ts')
+  } finally { await browser.close() }
+})

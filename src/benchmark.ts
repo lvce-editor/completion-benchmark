@@ -11,7 +11,7 @@ import { TargetSession } from './target-session.ts'
 import { processInstrumentation, utilityBootstrap, atomRendererInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
-import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
+import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion, waitTheiaWorkbench } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode' | 'atom' | 'theia'
 type AllEditorId = EditorId | 'zed'
@@ -117,6 +117,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   child.stdout.on('data', (data) => { log += data })
   child.stderr.on('data', (data) => { log += data })
   let browser: Browser | undefined
+  let page: Page | undefined
   let main: Protocol | undefined
   let closed = false
   const close = async () => {
@@ -207,7 +208,6 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
         await startupSession.detach().catch(() => {})
       }
     }
-    let page: Page | undefined
     while (Date.now() < deadline && !page) {
       for (const candidate of browser.contexts().flatMap((context) => context.pages())) {
         if (candidate.url() === 'about:blank' || (editor === 'atom' && !candidate.url().endsWith('/static/index.html'))) continue
@@ -224,6 +224,8 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       const trust = page.getByRole('button', { name: 'Yes, I trust the authors', exact: true })
       await trust.waitFor()
       if (await trust.isVisible()) await trust.click()
+      await trust.waitFor({ state: 'hidden' })
+      await waitTheiaWorkbench(page)
       await page.keyboard.press('Control+p')
       await page.getByRole('textbox', { name: /Search files by name/ }).fill(language === 'html' ? 'index.html' : 'index.ts')
       await page.getByRole('option', { name: language === 'html' ? /index.html/ : /index.ts/ }).waitFor()
@@ -245,6 +247,10 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     }
     return { page, browser, close, editor, language, main, inspectorInventory }
   } catch (error) {
+    if (page) {
+      await page.screenshot({ path: `${outputPrefix}-launch-failure.png` }).catch(() => {})
+      await writeFile(`${outputPrefix}-launch-failure.json`, JSON.stringify(await page.evaluate(() => ({ url: location.href, body: document.body.innerText, activeElement: document.activeElement?.outerHTML })).catch(() => ({})), null, 2)).catch(() => {})
+    }
     await close()
     throw error
   }

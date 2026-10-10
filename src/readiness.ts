@@ -1,5 +1,12 @@
 import type { Page } from 'playwright'
 
+// Theia attaches its shell and trust dialog before registering global keyboard
+// listeners. FrontendApplication.revealShell removes the preload indicator;
+// registration follows in the same task, before our next keyboard command.
+export async function waitTheiaWorkbench(page: Page): Promise<void> {
+  await page.waitForFunction(() => Boolean(document.querySelector('.theia-ApplicationShell')) && !document.querySelector('.theia-preload'))
+}
+
 export const completionUi = (editor: 'lvce' | 'vscode' | 'atom' | 'theia') => editor === 'lvce'
   ? { input: '.EditorInput textarea', rows: '.EditorCompletionItem', highlights: '.EditorCompletionItemHighlight' }
   : editor === 'atom' ? { input: 'atom-text-editor:not([mini]) .hidden-input', rows: 'autocomplete-suggestion-list li .word', highlights: '.character-match' }
