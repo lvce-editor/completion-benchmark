@@ -188,7 +188,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       await writeFile(`${outputPrefix}-focus-failure.json`, JSON.stringify(active, null, 2)).catch(() => {})
       throw new Error('Editor input did not receive focus')
     }
-    return { page, close, editor, language, main, inspectorUrls: () => [...new Set([...log.matchAll(/Debugger listening on (ws:\/\/[^\s]+)/g)].map((match) => match[1]))] }
+    return { page, browser, close, editor, language, main, inspectorUrls: () => [...new Set([...log.matchAll(/Debugger listening on (ws:\/\/[^\s]+)/g)].map((match) => match[1]))] }
   } catch (error) {
     await close()
     throw error
@@ -197,7 +197,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
 
 async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: string, action: () => Promise<unknown>) {
   if (!app.main) throw new Error('Missing main-process inspector')
-  const root = await app.page.context().newCDPSession(app.page)
+  const root = await app.browser!.newBrowserCDPSession()
   const pageSession = await app.page.context().newCDPSession(app.page)
   const sessions: { session: { send(method: string, params?: Record<string, unknown>): Promise<any> }; side: 'frontend' | 'backend'; identity: Record<string, unknown>; owned?: { close(): void | Promise<void> } }[] = []
   const beforeTargets: any[] = []
@@ -290,6 +290,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
     stage = 'warmup'
     const warmupRequests = await warmCompletion(page, editor, expected)
     await closeCompletions(page, editor)
+    stage = profiling ? 'profiler setup' : 'interaction'
     if (traced) {
       session = await page.context().newCDPSession(page)
       session.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => events.push(...data.value))
