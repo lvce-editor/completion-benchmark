@@ -1,9 +1,9 @@
 {
   "lvce": {
-    "version": "v0.120.7",
-    "asset": "lvce-v0.120.7_amd64.deb",
-    "url": "https://github.com/lvce-editor/lvce-editor/releases/download/v0.120.7/lvce-v0.120.7_amd64.deb",
-    "sha256": "961e4c2d0592857310d9aab1782a1dc1807443567f719dba4c07029125330ca1",
+    "version": "v0.121.19",
+    "asset": "lvce-v0.121.19_amd64.deb",
+    "url": "https://github.com/lvce-editor/lvce-editor/releases/download/v0.121.19/lvce-v0.121.19_amd64.deb",
+    "sha256": "f2233c978e9e1a9b247b7f3ab8354b7746687c68f1af4dfda97837f2388877f2",
     "binary": "usr/lib/lvce/lvce",
     "typescriptExtension": {
       "version": "v5.25.3",
