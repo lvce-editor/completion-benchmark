@@ -90,23 +90,34 @@ test('report rejects missing backend profile coverage and inconsistent total mil
 test('native screen observations remain separate from renderer charts and preserve uncertainty evidence', async () => {
   const root = await mkdtemp(join(tmpdir(), 'completion-native-report-'))
   try {
+    const evidence = { samples: [{ phase: 'opening' }, { phase: 'filtering' }], templateSha256: ['a'.repeat(64), 'b'.repeat(64)] }
     await writeFile(join(root, 'results.json'), JSON.stringify({ metadata: { zed: { version: '1.23.2' } }, trials: [
-      { editor: 'zed', language: 'html', phase: 'native-latency', status: 'passed', openingMs: null, filteringMs: null, render: null, native: {
-        openingMs: 50, filteringMs: 30, samples: [{ phase: 'opening' }, { phase: 'filtering' }], templateSha256: ['a'.repeat(64), 'b'.repeat(64)],
-      } },
+      ...Array.from({ length: 5 }, (_, repeat) => ({ editor: 'zed', language: 'html', repeat, phase: 'native-latency', status: 'passed', openingMs: null, filteringMs: null, render: null, native: {
+        ...evidence, openingMs: 50 + repeat, filteringMs: 30 + repeat,
+      } })),
+      { editor: 'zed', language: 'typescript', repeat: 0, phase: 'native-latency', status: 'failed', openingMs: null, filteringMs: null, render: null, error: 'completion did not appear' },
     ] }))
     await writeFile(join(root, 'zed-template.png'), Buffer.from('retained template evidence'))
     await writeFile(join(root, 'zed-warmup.tsv'), 'text\th1')
     const result = spawnSync(process.execPath, [resolve('src/report.ts'), '--input', root, '--output', join(root, 'site')])
-    assert.equal(result.status, 0, result.stderr.toString())
+    assert.equal(result.status, 1, result.stdout.toString())
     const html = await readFile(join(root, 'site/index.html'), 'utf8')
     assert.match(html, /Zed · screen-observed latency/)
-    assert.match(html, /50.00 <small>ms median upper bound/)
-    assert.match(html, /30.00 <small>ms median upper bound/)
+    assert.match(html, /52.00 <small>ms median upper bound/)
+    assert.match(html, /p95 54.00 ms · 5 samples/)
+    assert.match(html, /32.00 <small>ms median upper bound/)
+    assert.match(html, /p95 34.00 ms · 5 samples/)
+    assert.match(html, /href="#zed-native-html" aria-label="5 native samples; see Zed native latency below"><text class="native-samples"[^>]*>5 native samples below<\/text><\/a>/)
+    assert.match(html, /id="zed-native-html"/)
+    assert.match(html, /No successful samples · 1 failed trial\(s\)/)
+    assert.match(html, /1 failed native trial/)
+    assert.match(html, /completion did not appear/)
     assert.match(html, /Unsupported: Chromium paint, CSS style recalculation and JavaScript CPU profiling/)
     const heading = html.indexOf('<h3>Completion opening</h3>')
     const end = html.indexOf('</svg>', heading)
-    assert.doesNotMatch(html.slice(heading, end), /50\.00|30\.00/)
+    assert.doesNotMatch(html.slice(heading, end), /52\.00|32\.00/)
+    assert.match(html.slice(heading, end), /5 native samples below/)
+    assert.match(html, /class="unsupported"[^>]*>unsupported<\/text>/)
     assert.match(await readFile(join(root, 'site/raw/index.json'), 'utf8'), /zed-warmup.tsv/)
     assert.equal(await readFile(join(root, 'site/raw/zed-template.png'), 'utf8'), 'retained template evidence')
   } finally { await rm(root, { recursive: true, force: true }) }
