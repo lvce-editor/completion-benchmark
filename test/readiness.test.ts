@@ -67,3 +67,44 @@ test('warmup waits for provider registration without retrying a measured interac
     assert.equal(await page.locator('.EditorCompletionItem').count(), 0)
   } finally { await browser.close() }
 })
+
+for (const editor of ['atom', 'theia'] as const) {
+  test(`${editor} rejects stale query highlights before accepting a filtered row`, async () => {
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      const atom = editor === 'atom'
+      await page.setContent(atom
+        ? '<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li>Array<span class="character-match">Arr</span></li></ol></autocomplete-suggestion-list>'
+        : '<div class="theia-editor"><div class="monaco-editor"><textarea class="inputarea"></textarea></div></div><div class="suggest-widget"><div class="monaco-list-row">Array<span class="highlight">Arr</span></div></div>')
+      await page.focus(atom ? 'input' : 'textarea')
+      await armCompletion(page, editor, 'Array', 'KeyA', 'Arra', { timeoutMs: 1000 })
+      await page.keyboard.press('a')
+      await assert.rejects(collectCompletion(page), /Completion timeout.*trusted key observed/)
+      await page.locator(atom ? '.character-match' : '.highlight').evaluate((node) => { node.textContent = 'Arra' })
+      await armCompletion(page, editor, 'Array', 'KeyA', 'Arra', { timeoutMs: 1000 })
+      await page.keyboard.press('a')
+      const result = await collectCompletion(page)
+      assert.equal(result.highlight, 'Arra')
+      assert.ok(result.milliseconds > 0)
+    } finally { await browser.close() }
+  })
+}
+
+test('Atom waits for asynchronous Escape dismissal without reopening its list', async () => {
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.setContent('<atom-text-editor><input class="hidden-input"></atom-text-editor><autocomplete-suggestion-list><ol><li>a</li></ol></autocomplete-suggestion-list>')
+    await page.focus('input')
+    await page.evaluate(() => {
+      document.addEventListener('keydown', (event) => {
+        if (event.code === 'Escape') requestAnimationFrame(() => document.querySelector('autocomplete-suggestion-list')?.remove())
+        if (event.code === 'Space' && event.ctrlKey) document.body.dataset.reopened = 'yes'
+      })
+    })
+    await closeCompletions(page, 'atom')
+    assert.equal(await page.evaluate(() => document.body.dataset.reopened), undefined)
+    assert.equal(await page.locator('autocomplete-suggestion-list').count(), 0)
+  } finally { await browser.close() }
+})

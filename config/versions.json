@@ -18,5 +18,31 @@
     "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/2a59476c9bfcb90b3ddc372c36762471b7dfad1c/code-stable-x64-1791276637.tar.gz",
     "sha256": "d77d588f0454cbaaa71e723497de4160d15b95fba4988abe177b1432e6bd570a",
     "binary": "VSCode-linux-x64/code"
+  },
+  "atom": {
+    "version": "1.60.0",
+    "asset": "atom-1.60.0.deb",
+    "url": "https://github.com/atom/atom/releases/download/v1.60.0/atom-amd64.deb",
+    "sha256": "5c7c0259062b9d4911d2537bfceaff5316f9de111698840a90d7cd497df891a6",
+    "binary": "usr/share/atom/atom",
+    "typescriptExtension": {
+      "version": "14.2.1",
+      "asset": "atom-typescript-14.2.1.tar.gz",
+      "url": "https://codeload.github.com/TypeStrong/atom-typescript/tar.gz/refs/tags/v14.2.1",
+      "sha256": "69d8bcbb914acba7197d8a27173a36adbeccdc12204f1782e00a81dc8805c5d2"
+    },
+    "typescript": {
+      "version": "4.2.4",
+      "asset": "typescript-4.2.4.tgz",
+      "url": "https://registry.npmjs.org/typescript/-/typescript-4.2.4.tgz",
+      "sha256": "6eed9794296d93c83074e022652ac680314e0cf37b969945e9f0da4e47332901"
+    }
+  },
+  "theia": {
+    "version": "1.76.0",
+    "asset": "theia-1.76.0.deb",
+    "url": "https://download.eclipse.org/theia/ide/1.76.0/linux/TheiaIDE.deb",
+    "sha256": "92e46d9396ac96b6d9db11249440b2edd1084e8c5511272f4abf3fb6a9c570b5",
+    "binary": "opt/TheiaIDE/theia-ide-electron-app.bin"
   }
 }

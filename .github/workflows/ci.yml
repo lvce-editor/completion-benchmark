@@ -22,7 +22,7 @@ jobs:
       - run: npm ci
       - run: npm run type-check
       - run: npm run lint
-      - run: npx playwright install --with-deps chromium
+      - run: node node_modules/playwright/cli.js install --with-deps chromium
       - run: npm test
   benchmark:
     name: Benchmark (${{ matrix.editor }}, ${{ matrix.language }})
@@ -41,7 +41,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: node node_modules/playwright/cli.js install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1
       - run: npm run setup
       - name: Measure completions

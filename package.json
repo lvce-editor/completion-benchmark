@@ -11,12 +11,15 @@
     "test": "node --test test/*.test.ts",
     "lint": "eslint src test"
   },
-  "engines": { "node": ">=24.15.0" },
+  "engines": {
+    "node": ">=24.15.0"
+  },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@types/node": "24.13.3",
     "eslint": "9.39.5",
     "playwright": "1.58.2",
+    "playwright-core-atom": "npm:playwright-core@1.11.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0"
   }
