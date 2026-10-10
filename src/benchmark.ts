@@ -209,16 +209,25 @@ async function profileWorkload(app: Awaited<ReturnType<typeof launch>>, prefix: 
     const { targetInfo: applicationTarget } = await pageSession.send('Target.getTargetInfo')
     if (!applicationTarget?.targetId || applicationTarget.type !== 'page') throw new Error('Missing application page target')
     const supported = ['page', 'worker', 'shared_worker', 'service_worker', 'iframe']
-    beforeTargets.push(...(await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type)))
+    const discoveredTargets = (await root.send('Target.getTargets')).targetInfos.filter((target: any) => supported.includes(target.type))
+    beforeTargets.push(...discoveredTargets)
     if (!beforeTargets.some((target) => target.targetId === applicationTarget.targetId)) throw new Error('Missing application page target coverage')
     const isolateIds = new Set<string>()
     for (const target of beforeTargets) {
-      const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false })
-      const targetSession = new TargetSession(root, sessionId)
-      const { id } = await targetSession.send('Runtime.getIsolateId')
-      if (isolateIds.has(id)) { await targetSession.close(); continue }
-      isolateIds.add(id)
-      sessions.push({ session: targetSession, side: 'frontend', identity: { type: target.type, targetId: target.targetId, url: target.url, isolateId: id }, owned: targetSession })
+      let targetSession: TargetSession | undefined
+      let sessionId: string | undefined
+      try {
+        ({ sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false }))
+        targetSession = new TargetSession(root, sessionId!)
+        const { id } = await targetSession.send('Runtime.getIsolateId')
+        if (isolateIds.has(id)) { await targetSession.close(); continue }
+        isolateIds.add(id)
+        sessions.push({ session: targetSession, side: 'frontend', identity: { type: target.type, targetId: target.targetId, url: target.url, isolateId: id }, owned: targetSession })
+      } catch (error) {
+        await targetSession?.close().catch(() => {})
+        const currentTargets = (await root.send('Target.getTargets')).targetInfos.filter((entry: any) => supported.includes(entry.type))
+        throw new Error(`Failed to attach frontend target ${JSON.stringify(target)} with session ${sessionId ?? 'none'}; target still present: ${currentTargets.some((entry: any) => entry.targetId === target.targetId)}; current targets: ${JSON.stringify(currentTargets)}; cause: ${String(error)}`)
+      }
     }
     const mainInfo = (await app.main.send('Runtime.evaluate', { expression: '({pid:process.pid,argv:process.argv})', returnByValue: true })).result.value
     if (!Number.isSafeInteger(mainInfo?.pid)) throw new Error('Could not identify the Electron main process')
