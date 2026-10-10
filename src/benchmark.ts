@@ -5,20 +5,22 @@ import { basename, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { chromium, type Browser, type Page, type CDPSession } from 'playwright'
+import atomPlaywright from 'playwright-core-atom'
 import { Protocol } from './protocol.ts'
 import { TargetSession } from './target-session.ts'
-import { processInstrumentation, utilityBootstrap, parseInspectorProcesses } from './process-instrumentation.ts'
+import { processInstrumentation, utilityBootstrap, atomRendererInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
-import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion } from './readiness.ts'
+import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion, waitTheiaWorkbench } from './readiness.ts'
 
-type EditorId = 'lvce' | 'vscode'
+type EditorId = 'lvce' | 'vscode' | 'atom' | 'theia'
+type AllEditorId = EditorId | 'zed'
 type Language = 'html' | 'typescript'
 interface Trial {
-  editor: EditorId
+  editor: AllEditorId
   language: Language
   repeat: number
-  phase: 'latency' | 'render' | 'profile'
+  phase: 'latency' | 'render' | 'profile' | 'native-latency'
   status: 'passed' | 'failed'
   openingMs: number | null
   filteringMs: number | null
@@ -29,6 +31,7 @@ interface Trial {
   warmupRequests?: number
   observations?: { opening: { row: string; highlight: string }; filtering: { row: string; highlight: string } }
   error?: string
+  native?: { openingMs: number; filteringMs: number; [key: string]: unknown }
 }
 
 interface JavaScriptProfile { side: 'frontend' | 'backend'; identity: Record<string, unknown>; file: string; javascriptMs: number; idleMs: number; vmMs: number; samples: number; discardedSamples: number; durationMs: number }
@@ -36,9 +39,9 @@ interface JavaScriptProfile { side: 'frontend' | 'backend'; identity: Record<str
 const { values } = parseArgs({ options: {
   editor: { type: 'string' }, language: { type: 'string' }, repeats: { type: 'string', default: '3' }, output: { type: 'string', default: 'results' },
 } })
-const editors = (values.editor ? [values.editor] : ['lvce', 'vscode']) as EditorId[]
+const editors = (values.editor ? [values.editor] : ['lvce', 'vscode', 'atom', 'theia', 'zed']) as AllEditorId[]
 const languages = (values.language ? [values.language] : ['html', 'typescript']) as Language[]
-if (editors.some((editor) => !['lvce', 'vscode'].includes(editor))) throw new Error('--editor must be lvce or vscode')
+if (editors.some((editor) => !['lvce', 'vscode', 'atom', 'theia', 'zed'].includes(editor))) throw new Error('--editor must be lvce, vscode, atom, theia or zed')
 if (languages.some((language) => !['html', 'typescript'].includes(language))) throw new Error('--language must be html or typescript')
 const repeats = Number(values.repeats)
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 20) throw new Error('--repeats must be between 1 and 20')
@@ -72,6 +75,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   if (profiling) {
     await writeFile(preload, processInstrumentation)
     await writeFile(join(root, 'utility-bootstrap.cjs'), utilityBootstrap)
+    await writeFile(join(root, 'atom-renderer-instrumentation.cjs'), atomRendererInstrumentation)
   }
   const userData = join(root, 'profile')
   await mkdir(join(userData, 'User'), { recursive: true })
@@ -79,8 +83,9 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   if (editor === 'vscode') {
     await writeFile(join(userData, 'User/keybindings.json'), JSON.stringify([{ key: 'ctrl+space', command: 'editor.action.triggerSuggest', when: 'editorTextFocus' }]))
   }
-  const binary = editor === 'lvce' ? setup.lvce.binary : setup.vscode.binary
-  const workspace = resolve(`.tmp/fixture/${language}`)
+  const binary = setup[editor].binary
+  const workspace = join(root, 'workspace')
+  await cp(resolve(`.tmp/fixture/${language}`), workspace, { recursive: true })
   const file = join(workspace, language === 'html' ? 'index.html' : 'index.ts')
   const args = ['--no-sandbox', '--disable-gpu', '--remote-debugging-port=0', ...(profiling ? ['--inspect-brk=0'] : []), `--user-data-dir=${userData}`]
   if (editor === 'lvce') {
@@ -90,8 +95,20 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     await writeFile(join(root, 'config/lvce/settings.json'), JSON.stringify({ 'editor.diagnostics': true, 'editor.completionsOnType': true }))
     await cp(join('.tmp/apps/typescript-extension'), extension, { recursive: true })
     args.push(workspace, file)
-  } else {
+  } else if (editor === 'vscode') {
     args.push(`--extensions-dir=${join(root, 'extensions')}`, '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--new-window', workspace, file)
+  }
+  if (editor === 'atom') {
+    Object.assign(env, { ATOM_HOME: join(root, 'atom'), COMPLETION_BENCHMARK_LEGACY_ELECTRON: '1' })
+    await mkdir(join(root, 'atom/packages'), { recursive: true })
+    await cp('.tmp/apps/atom-typescript', join(root, 'atom/packages/atom-typescript'), { recursive: true })
+    await writeFile(join(root, 'atom/config.cson'), '"*":\n  welcome:\n    showOnStartup: false\n  core:\n    disabledPackages: ["github", "autocomplete-snippets"]\n    telemetryConsent: "no"\n  "autocomplete-plus":\n    enableAutoActivation: false\n')
+    await writeFile(join(root, 'atom/init.js'), `${profiling ? `require(${JSON.stringify(join(root, 'atom-renderer-instrumentation.cjs'))});\n` : ''}atom.packages.activatePackage('atom-typescript');\n`)
+    args.push(file)
+  }
+  if (editor === 'theia') {
+    Object.assign(env, { THEIA_CONFIG_DIR: join(root, 'theia') })
+    args.push(workspace)
   }
   const child = spawn(binary, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''
@@ -100,6 +117,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
   child.stdout.on('data', (data) => { log += data })
   child.stderr.on('data', (data) => { log += data })
   let browser: Browser | undefined
+  let page: Page | undefined
   let main: Protocol | undefined
   let closed = false
   const close = async () => {
@@ -141,7 +159,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       const paused = main.event('Debugger.paused')
       await main.send('Runtime.runIfWaitingForDebugger')
       await paused
-      const instrumented = await main.send('Runtime.evaluate', { expression: `(()=>{ const load=process.getBuiltinModule('module').createRequire(process.cwd()+'/completion-benchmark.cjs'); load(${JSON.stringify(preload)}); return true; })()`, returnByValue: true })
+      const instrumented = await main.send('Runtime.evaluate', { expression: `(()=>{ const load=(process.getBuiltinModule ? process.getBuiltinModule('module') : process.mainModule.require('module')).createRequire(process.cwd()+'/completion-benchmark.cjs'); load(${JSON.stringify(preload)}); return true; })()`, returnByValue: true })
       if (instrumented.exceptionDetails || instrumented.result.value !== true) throw new Error(`Inspector process instrumentation failed: ${JSON.stringify(instrumented)}`)
       await main.send('Debugger.resume')
       await main.send('Debugger.disable')
@@ -154,7 +172,7 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
       if (!endpoint) await delay(50)
     }
     if (!endpoint) throw new Error(`Timed out waiting for CDP endpoint; output: ${log.slice(-1500)}`)
-    browser = await chromium.connectOverCDP(endpoint, { timeout: 30000 })
+    browser = await (editor === 'atom' ? atomPlaywright.chromium.connectOverCDP({ endpointURL: endpoint, timeout: 30000 }) : chromium.connectOverCDP(endpoint, { timeout: 30000 })) as unknown as Browser
     if (profiling && editor === 'vscode') {
       // Observe the pinned editor's startup CPU-baseline worker from the earliest
       // browser connection. It must finish before capture; no timed action retries.
@@ -190,23 +208,38 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
         await startupSession.detach().catch(() => {})
       }
     }
-    let page: Page | undefined
     while (Date.now() < deadline && !page) {
-      page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() !== 'about:blank')
+      for (const candidate of browser.contexts().flatMap((context) => context.pages())) {
+        if (candidate.url() === 'about:blank' || (editor === 'atom' && !candidate.url().endsWith('/static/index.html'))) continue
+        if (editor === 'theia' && !await candidate.evaluate(() => Boolean(document.querySelector('[role=tablist]'))).catch(() => false)) continue
+        page = candidate
+        break
+      }
       if (!page) await delay(100)
     }
-    if (!page) throw new Error('Editor did not open a workbench page')
+    if (!page) throw new Error(`Editor did not open a workbench page: ${JSON.stringify(browser.contexts().flatMap((context) => context.pages()).map((candidate) => candidate.url()))}`)
     page.setDefaultTimeout(30000)
     await page.setViewportSize({ width: 1280, height: 900 })
-    const input = page.locator(completionUi(editor).input)
-    await input.waitFor({ state: 'attached' })
+    if (editor === 'theia') {
+      const trust = page.getByRole('button', { name: 'Yes, I trust the authors', exact: true })
+      await trust.waitFor()
+      if (await trust.isVisible()) await trust.click()
+      await trust.waitFor({ state: 'hidden' })
+      await waitTheiaWorkbench(page)
+      await page.keyboard.press('Control+p')
+      await page.getByRole('textbox', { name: /Search files by name/ }).fill(language === 'html' ? 'index.html' : 'index.ts')
+      await page.getByRole('option', { name: language === 'html' ? /index.html/ : /index.ts/ }).waitFor()
+      await page.keyboard.press('Enter')
+    }
+    const input = completionUi(editor).input
+    await page.waitForSelector(input, { state: 'attached' })
     if (editor === 'vscode') {
       await page.locator('#workbench\\.parts\\.editor .view-lines').click({ position: { x: 90, y: 80 } })
-      await input.focus()
+      await page.focus(input)
     } else {
-      await input.focus()
+      await page.focus(input)
     }
-    if (!await input.evaluate((element) => document.activeElement === element)) {
+    if (!await page.evaluate((selector) => document.activeElement?.matches(selector), input)) {
       const active = await page.evaluate(() => ({ active: document.activeElement?.outerHTML.slice(0, 500), text: (document.body?.innerText ?? '').slice(0, 1200) }))
       await page.screenshot({ path: `${outputPrefix}-focus-failure.png` }).catch(() => {})
       await writeFile(`${outputPrefix}-focus-failure.json`, JSON.stringify(active, null, 2)).catch(() => {})
@@ -214,6 +247,10 @@ async function launch(editor: EditorId, language: Language, outputPrefix: string
     }
     return { page, browser, close, editor, language, main, inspectorInventory }
   } catch (error) {
+    if (page) {
+      await page.screenshot({ path: `${outputPrefix}-launch-failure.png` }).catch(() => {})
+      await writeFile(`${outputPrefix}-launch-failure.json`, JSON.stringify(await page.evaluate(() => ({ url: location.href, body: document.body.innerText, activeElement: document.activeElement?.outerHTML })).catch(() => ({})), null, 2)).catch(() => {})
+    }
     await close()
     throw error
   }
@@ -485,10 +522,39 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
   }
 }
 
+async function measureNative(language: Language, repeat: number): Promise<Trial> {
+  const prefix = join(output, `zed-${language}-${repeat + 1}`)
+  let log = ''
+  let native: any
+  let interrupted = false
+  let stop: (() => void) | undefined
+  try {
+    const child = spawn('/usr/bin/python3', ['src/native-benchmark.py', '--language', language, '--prefix', prefix], { stdio: ['ignore', 'pipe', 'pipe'] })
+    stop = () => { interrupted = true; child.kill('SIGTERM') }
+    process.once('SIGINT', stop)
+    process.once('SIGTERM', stop)
+    child.stdout.on('data', (data) => { log += data })
+    child.stderr.on('data', (data) => { log += data })
+    const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve) })
+    native = JSON.parse(await readFile(`${prefix}-native.json`, 'utf8'))
+    if (code !== 0 || native.status !== 'passed') throw new Error(native.error ?? `Native harness exited ${code}`)
+    return { editor: 'zed', language, repeat, phase: 'native-latency', status: 'passed', openingMs: null, filteringMs: null, render: null, trace: null, screenshot: basename(`${prefix}-filtering-measured.png`), warmupRequests: native.warmupRequests, native }
+  } catch (error) {
+    return { editor: 'zed', language, repeat, phase: 'native-latency', status: 'failed', openingMs: null, filteringMs: null, render: null, trace: null, screenshot: null, error: String(error) }
+  } finally {
+    if (stop) {
+      process.off('SIGINT', stop)
+      process.off('SIGTERM', stop)
+    }
+    await writeFile(`${prefix}-controller.log`, log)
+    if (interrupted) process.exit(130)
+  }
+}
+
 for (const editor of editors) for (const language of languages) for (let repeat = 0; repeat < repeats; repeat++) {
-  const latency = await measure(editor, language, repeat, 'latency')
+  const latency = editor === 'zed' ? await measureNative(language, repeat) : await measure(editor, language, repeat, 'latency')
   trials.push(latency)
-  if (latency.status === 'passed') {
+  if (latency.status === 'passed' && editor !== 'zed') {
     trials.push(await measure(editor, language, repeat, 'render'))
     trials.push(await measure(editor, language, repeat, 'profile'))
   }

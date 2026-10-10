@@ -1,20 +1,20 @@
 # LVCE Editor completion benchmark
 
-This repository measures completion opening, incremental filtering, browser paint work, CSS style recalculation and estimated JavaScript execution time in the official LVCE Editor and VS Code desktop applications. It runs HTML and TypeScript fixtures in fresh, isolated profiles. Results from successful runs on `main` are published through GitHub Pages.
+This repository measures completion opening, incremental filtering, browser paint work, CSS style recalculation and estimated JavaScript execution time in the official LVCE Editor, VS Code, Atom and Eclipse Theia desktop applications, plus separate native screen-observed latency in Zed. It runs HTML and TypeScript fixtures in fresh, isolated profiles. Results from successful runs on `main` are published through GitHub Pages.
 
 ## Run locally
 
-Linux x64, Node 24.15+, npm, `dpkg-deb`, `tar`, an X server or Xvfb, and Electron's GTK/NSS/GBM/ALSA libraries are required. The CI workflow installs the system packages and uses Xvfb. Setup downloads the pinned editor binaries and TypeScript provider (about 450 MB total) and checks every archive against its SHA-256 digest.
+Linux x64, Node 24.15+, npm, `dpkg-deb`, `tar`, an X server or Xvfb, and Electron's GTK/NSS/GBM/ALSA libraries are required. The CI workflow installs the system packages and uses Xvfb. Setup downloads the pinned editor binaries and TypeScript provider (several GB total) and checks every archive against its SHA-256 digest.
 
 ```sh
 npm ci
 npm run setup
-xvfb-run -a npm run benchmark -- --repeats 5
+xvfb-run -a -s '-screen 0 1280x900x24' npm run benchmark -- --repeats 5
 npm run report
 # Serve site/ with any static HTTP server.
 ```
 
-Use `--editor lvce|vscode`, `--language html|typescript`, `--repeats 1`, and `--output results/<name>` for a focused run. `.tmp/` holds downloaded applications and fixtures; `results/` holds JSON, screenshots, launch logs and Chromium trace events. `site/raw/` retains the evidence linked from the report.
+Use `--editor lvce|vscode|atom|theia|zed`, `--language html|typescript`, `--repeats 1`, and `--output results/<name>` for a focused run. `.tmp/` holds downloaded applications and fixtures; `results/` holds JSON, screenshots, launch logs and Chromium trace events. `site/raw/` retains the evidence linked from the report.
 
 ## Measurements
 
@@ -34,11 +34,17 @@ The [completion filtering investigation](docs/completion-filtering-latency.md) r
 
 ## Editor coverage
 
-LVCE Editor and VS Code have validated desktop adapters and run for HTML and TypeScript. Atom, Zed and Eclipse Theia have no validated samples, and each chart labels this coverage. A checksum-verified Atom 1.60.0 Linux desktop launch was attempted in an isolated Xvfb profile, but its legacy Electron runtime terminated with `GPU process is not usable`, before measurements could be validated. Zed 1.18.1 uses a native renderer; the Chromium CDP harness cannot collect equivalent paint or CSS metrics, and no trusted-key-to-visible-completion-list adapter was validated. Eclipse Theia 1.75.0 launched with a Monaco workbench, but the bounded fixture probe closed the renderer before provider responses or query-qualified suggestions could be validated. These are feasibility outcomes, not zero-valued measurements.
+LVCE Editor, VS Code, Atom 1.60.0 and Eclipse Theia 1.76.0 use Chromium adapters for HTML and TypeScript. Atom uses legacy Playwright 1.11.1 because modern CDP download commands are unsupported by Electron 9; browser installation explicitly uses the modern Playwright CLI. Atom's TypeScript provider is atom-typescript 14.2.1 with compiler 4.2.4. Fixtures are copied into each isolated profile outside the repository so provider resolution cannot select the benchmark's own compiler. Theia's backend configuration is isolated with THEIA_CONFIG_DIR.
+
+Zed 1.23.2 uses native rendering. Its experimental accessibility tree does not expose suggestion text, so its latency is presented separately from the renderer charts. A discarded warmup learns exact opening and filtered suggestion-label templates. Each phase retains its own label region so menu movement is observed without including asynchronously resolved type details. Opening requires a recognized expected suggestion; filtering is verified by accepting the selected completion and checking the exact copied editor buffer. Undo restores the original fixture before measurement. The two templates must differ, and a timed interaction cannot start with its target already present. Each measured action ends after two consecutive matching X11 captures. The measured filtered suggestion is also accepted and verified without retrying the timed interaction. OCR runs during discarded warmup only, never in the timed capture loop.
+
+Native results use Python monotonic_ns to bracket XTest input submission/round-trip and synchronous XGetImage reads. They report conservative screen-observed upper bounds, first-match bounds, injection round-trip, capture duration/gaps and ten calibration captures. These include input/controller, software rendering, polling and capture overhead; they are neither trusted renderer-keydown measurements nor physical display latency. The report keeps native results outside the common renderer-latency rankings. Zed's Chromium paint, CSS and JavaScript profiling are explicitly unsupported, not zero-valued samples. Pixel templates, screenshots, OCR evidence, confirmed fixture text, launch logs and intervals remain in raw artifacts. Exact matching rejects stale suggestions and partial paints; an unstable template fails the trial.
+
+Zed uses the pinned HTML extension 0.3.2, @zed-industries/vscode-langservers-extracted 4.10.8, typescript-language-server 5.0.0 and TypeScript 5.9.3. The provider package lock retains registry integrity hashes and its own SHA-256 in provenance. Zed receives explicit provider binary paths, fresh XDG and user-data directories and a private D-Bus/keyring session. Software Vulkan is allowed for Xvfb. Native runs additionally require libvulkan1, mesa-vulkan-drivers, python3-pil, python3-xlib, xdotool, xclip, tesseract-ocr, dbus-x11 and gnome-keyring; CI installs them.
 
 ## CI and publication
 
-Pull requests run type checking, lint, focused measurement tests and one real desktop run for each editor/language pair, including CPU-profile capture and backend/frontend coverage validation. Main runs five repetitions for each pair, combines the JSON, trace and CPU-profile artifacts, creates the static report, and deploys it to GitHub Pages only after all four desktop jobs succeed.
+Pull requests run type checking, lint, focused measurement tests and one real desktop run for each editor/language pair, including CPU-profile capture and backend/frontend coverage validation for Electron editors, and query-specific native endpoint validation for Zed. Main runs five repetitions for each pair, combines the JSON, trace and CPU-profile artifacts, creates the static report, and deploys it to GitHub Pages only after all ten desktop jobs succeed.
 
 ## References
 

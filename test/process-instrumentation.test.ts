@@ -49,3 +49,26 @@ test('utility bootstrap preserves entry argv and installs descendant instrumenta
     assert.ok(!records[0].argv.includes(bootstrap))
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('Atom renderer spawn hook captures Node-mode children and their grandchildren', async () => {
+  const { atomRendererInstrumentation } = await import('../src/process-instrumentation.ts')
+  const root = await mkdtemp(join(tmpdir(), 'completion-atom-spawn-'))
+  try {
+    await writeFile(join(root, 'process-instrumentation.cjs'), processInstrumentation)
+    const hook = join(root, 'renderer.cjs')
+    await writeFile(hook, atomRendererInstrumentation)
+    const grandchild = join(root, 'grandchild.cjs')
+    const child = join(root, 'child.cjs')
+    const parent = join(root, 'parent.cjs')
+    await writeFile(grandchild, 'process.exit(0)')
+    await writeFile(child, `require('child_process').fork(${JSON.stringify(grandchild)},[],{execArgv:[]}).on('exit',code=>process.exit(code))`)
+    await writeFile(parent, `require(${JSON.stringify(hook)});require('child_process').spawn(process.execPath,[${JSON.stringify(child)}],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}}).on('exit',code=>process.exit(code))`)
+    const result = spawnSync(process.execPath, [parent], { timeout: 15000 })
+    assert.equal(result.status, 0, result.stderr.toString())
+    const records = parseInspectorProcesses(await readFile(join(root, 'process-inspectors.jsonl'), 'utf8'))
+    assert.equal(records.length, 2)
+    assert.ok(records.some((record) => record.argv.includes(child)))
+    assert.ok(records.some((record) => record.argv.includes(grandchild)))
+    assert.ok(!records.some((record) => record.argv.includes(parent)))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
