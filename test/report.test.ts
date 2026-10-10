@@ -5,6 +5,16 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 
+function chartEditors(html: string, title: string): string[] {
+  const heading = html.indexOf(`<h3>${title}</h3>`)
+  assert.notEqual(heading, -1, `missing chart: ${title}`)
+  const start = html.indexOf('<svg class="chart"', heading)
+  const end = html.indexOf('</svg>', start)
+  assert.notEqual(start, -1, `missing SVG for chart: ${title}`)
+  assert.notEqual(end, -1, `unterminated SVG for chart: ${title}`)
+  return [...html.slice(start, end).matchAll(/<text class="editor"[^>]*>(.*?)<\/text>/g)].map(([, editor]) => editor!)
+}
+
 test('report charts retain statistics, zero values, missing groups and failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'completion-report-test-'))
   try {
@@ -14,6 +24,8 @@ test('report charts retain statistics, zero values, missing groups and failures'
     }, trials: [
       { editor: 'lvce', language: 'html', phase: 'latency', status: 'passed', openingMs: 0, filteringMs: 2, render: null },
       { editor: 'lvce', language: 'html', phase: 'latency', status: 'passed', openingMs: 100, filteringMs: 8, render: null },
+      { editor: 'atom', language: 'html', phase: 'latency', status: 'passed', openingMs: 0, filteringMs: 3, render: { paintDurationMs: 2, paintCount: 0, styleRecalculationDurationMs: 3, styleRecalculationCount: 5 } },
+      { editor: 'theia', language: 'html', phase: 'latency', status: 'passed', openingMs: null, filteringMs: 3, render: null },
       { editor: 'lvce', language: 'typescript', status: 'passed', openingMs: 14, filteringMs: 9, render: null },
       { editor: 'vscode', language: 'html', phase: 'latency', status: 'passed', openingMs: 12, filteringMs: 8, render: {
         paintDurationMs: 0, paintCount: 0, styleRecalculationDurationMs: 0, styleRecalculationCount: 0,
@@ -31,7 +43,7 @@ test('report charts retain statistics, zero values, missing groups and failures'
     assert.ok(html.indexOf('HTML completions') < html.indexOf('TypeScript completions'))
     assert.match(html, /Validated editors: LVCE Editor test · VS Code test/)
     assert.doesNotMatch(html, /platform unknown|run unknown|fixtures unknown/)
-    assert.match(html, /no validated samples: VS Code, Eclipse Theia, Atom, Zed/)
+    assert.match(html, /no validated samples: Eclipse Theia, Zed/)
     assert.match(html, /missing &lt;items&gt;/)
     assert.match(html, /raw\/.+-results.json/)
     assert.match(html, /12.00 \/ 12.00 ms \(n=1\)/)
@@ -48,6 +60,11 @@ test('report charts retain statistics, zero values, missing groups and failures'
     assert.match(html, /chart-scroll\{overflow-x:auto/)
     assert.match(html, /rotate\(48\)/)
     assert.match(html, /class="grid"/)
+    assert.deepEqual(chartEditors(html, 'Completion opening').slice(0, 3), ['Atom', 'LVCE Editor', 'VS Code'])
+    assert.deepEqual(chartEditors(html, 'Live completion filtering').slice(0, 4), ['LVCE Editor', 'Atom', 'Eclipse Theia', 'VS Code'])
+    assert.deepEqual(chartEditors(html, 'Live completion filtering').slice(-1), ['Zed'])
+    assert.deepEqual(chartEditors(html, 'Paint duration').slice(0, 2), ['VS Code', 'Atom'])
+    assert.deepEqual(chartEditors(html, 'Paint duration').slice(-3), ['Eclipse Theia', 'LVCE Editor', 'Zed'])
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

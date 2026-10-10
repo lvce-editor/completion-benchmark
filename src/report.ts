@@ -53,6 +53,13 @@ const languageSections = ['html', 'typescript'].map((language) => {
         .filter((value: unknown): value is number => typeof value === 'number' && Number.isFinite(value))
       return { editor, numbers }
     })
+    bars.sort((a, b) => {
+      if (a.numbers.length === 0 || b.numbers.length === 0) {
+        if (a.numbers.length !== b.numbers.length) return a.numbers.length === 0 ? 1 : -1
+        return editorName(a.editor).localeCompare(editorName(b.editor))
+      }
+      return median(a.numbers) - median(b.numbers) || editorName(a.editor).localeCompare(editorName(b.editor))
+    })
     const maximum = Math.max(0, ...bars.flatMap(({ numbers }) => numbers.length ? [p95(numbers)] : []))
     const axisMax = maximum > 0 ? maximum * 1.1 : 1
     const width = 1000
