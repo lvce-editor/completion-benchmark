@@ -38,7 +38,7 @@ test('report charts retain statistics, zero values, missing groups and failures'
     const result = spawnSync(process.execPath, [resolve('src/report.ts'), '--input', root, '--output', join(root, 'site')])
     assert.equal(result.status, 1)
     const html = await readFile(join(root, 'site/index.html'), 'utf8')
-    assert.equal((html.match(/<svg class="chart" role="img"/g) ?? []).length, 18)
+    assert.equal((html.match(/<svg class="chart" role="img"/g) ?? []).length, 20)
     assert.equal((html.match(/<h3>Completion opening<\/h3>/g) ?? []).length, 2)
     assert.ok(html.indexOf('HTML completions') < html.indexOf('TypeScript completions'))
     assert.match(html, /Validated editors: LVCE Editor test · VS Code test/)
@@ -59,6 +59,7 @@ test('report charts retain statistics, zero values, missing groups and failures'
     assert.match(html, /0\.00 \/ 100\.00 ms \(n=2\)/)
     assert.match(html, /0\.00 \/ 0\.00 events \(n=1\)/)
     assert.match(html, /median markers|Blue markers show the median/)
+    assert.match(html, /Chromium composited layer count/)
     assert.match(html, /chart-scroll\{overflow-x:auto/)
     assert.match(html, /rotate\(48\)/)
     assert.match(html, /class="grid"/)
@@ -67,6 +68,50 @@ test('report charts retain statistics, zero values, missing groups and failures'
     assert.deepEqual(chartEditors(html, 'Live completion filtering').slice(-1), ['Zed'])
     assert.deepEqual(chartEditors(html, 'Paint duration').slice(0, 2), ['VS Code', 'Atom'])
     assert.deepEqual(chartEditors(html, 'Paint duration').slice(-3), ['Eclipse Theia', 'LVCE Editor', 'Zed'])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('layer chart aggregates validated LVCE and VS Code samples and omits historical and failed trials', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'completion-layer-chart-test-'))
+  try {
+    const layers = (count: number) => Array.from({ length: count }, (_, index) => ({
+      layerId: `layer-${index}`, drawsContent: index > 0, width: 100 + index, height: 80 + index,
+    }))
+    const sample = (editor: string, language: string, count: number, repeat: number) => ({
+      editor, language, repeat, phase: 'render', status: 'passed',
+      render: { paintDurationMs: 1, paintCount: 1, styleRecalculationDurationMs: 1, styleRecalculationCount: 1, compositedLayerCount: count },
+      layerTree: { observedAt: '2026-10-12T00:00:00.000Z', compositedLayerCount: count, contentLayerCount: Math.max(0, count - 1), layers: layers(count) },
+    })
+    await writeFile(join(root, 'results.json'), JSON.stringify({ trials: [
+      sample('lvce', 'html', 4, 0), sample('lvce', 'html', 6, 1), sample('vscode', 'html', 8, 0), sample('vscode', 'html', 10, 1),
+      sample('lvce', 'typescript', 2, 0), sample('lvce', 'typescript', 4, 1), sample('vscode', 'typescript', 6, 0), sample('vscode', 'typescript', 8, 1),
+      { editor: 'atom', language: 'html', phase: 'render', status: 'passed', render: { paintDurationMs: 1, paintCount: 1, styleRecalculationDurationMs: 1, styleRecalculationCount: 1 } }, // Historical result without a LayerTree metric.
+      { editor: 'lvce', language: 'html', phase: 'render', status: 'failed', render: null, error: 'LayerTree evidence unavailable' },
+    ] }))
+    const result = spawnSync(process.execPath, [resolve('src/report.ts'), '--input', root, '--output', join(root, 'site')])
+    assert.equal(result.status, 1, `${result.stdout.toString()}\n${result.stderr.toString()}`)
+    const html = await readFile(join(root, 'site/index.html'), 'utf8')
+    assert.equal((html.match(/<h3>Chromium composited layer count<\/h3>/g) ?? []).length, 2)
+    assert.match(html, /4\.00 \/ 6\.00 layers \(n=2\)/)
+    assert.match(html, /8\.00 \/ 10\.00 layers \(n=2\)/)
+    assert.match(html, /2\.00 \/ 4\.00 layers \(n=2\)/)
+    assert.match(html, /6\.00 \/ 8\.00 layers \(n=2\)/)
+    assert.deepEqual(chartEditors(html, 'Chromium composited layer count').slice(0, 2), ['LVCE Editor', 'VS Code'])
+    const chartStart = html.indexOf('<h3>Chromium composited layer count</h3>')
+    const chartEnd = html.indexOf('</svg>', chartStart)
+    assert.match(html.slice(chartStart, chartEnd), /no validated samples: Atom, Eclipse Theia/)
+    assert.match(html, /LayerTree\.layerTreeDidChange payload/)
+    assert.match(html, /LayerTree evidence unavailable/)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('report rejects composited layer counts without matching captured evidence', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'completion-layer-report-test-'))
+  try {
+    await writeFile(join(root, 'results.json'), JSON.stringify({ trials: [{ editor: 'lvce', language: 'html', phase: 'render', status: 'passed', render: { compositedLayerCount: 1 }, layerTree: { compositedLayerCount: 2, contentLayerCount: 1, layers: [] } }] }))
+    const result = spawnSync(process.execPath, [resolve('src/report.ts'), '--input', root, '--output', join(root, 'site')])
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr.toString(), /Invalid Chromium composited layer evidence/)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

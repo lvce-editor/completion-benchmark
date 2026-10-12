@@ -24,6 +24,7 @@ export interface TraceSummary {
   paintDurationMs: number
   styleRecalculationCount: number
   styleRecalculationDurationMs: number
+  compositedLayerCount?: number
 }
 
 export function summarizeTrace(events: TraceEvent[]): TraceSummary {
