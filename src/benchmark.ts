@@ -11,6 +11,7 @@ import { TargetSession } from './target-session.ts'
 import { processInstrumentation, utilityBootstrap, atomRendererInstrumentation, parseInspectorProcesses } from './process-instrumentation.ts'
 import { ProfileSetupTargetExited, withFreshProfileSetup, assertProfileTargetMembership } from './profile-setup.ts'
 import { summarizeCpuProfile, summarizeInteractionTrace, type TraceEvent } from './metrics.ts'
+import { LayerTreeCollector, type LayerTreeEvidence } from './layerMetrics.ts'
 import { armCompletion, collectCompletion, completionUi, closeCompletions, warmCompletion, waitTheiaWorkbench } from './readiness.ts'
 
 type EditorId = 'lvce' | 'vscode' | 'atom' | 'theia'
@@ -25,6 +26,7 @@ interface Trial {
   openingMs: number | null
   filteringMs: number | null
   render: ReturnType<typeof summarizeInteractionTrace> | null
+  layerTree?: LayerTreeEvidence
   screenshot: string | null
   trace: string | null
   javascript?: { frontendMs: number; backendMs: number; totalMs: number; profiles: JavaScriptProfile[]; coverage: { targets: number; workers: number; backendProcesses: number }; samplingIntervalMicroseconds: number; captureStartedAt: string; captureEndedAt: string; captureBoundary: string }
@@ -454,6 +456,8 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
   let app: Awaited<ReturnType<typeof launch>> | undefined
   let page: Page | undefined
   let session: CDPSession | undefined
+  let layerTreeCollector: LayerTreeCollector | undefined
+  let layerTreeEvidence: LayerTreeEvidence | undefined
   const events: TraceEvent[] = []
   let stage = 'launch'
   try {
@@ -472,6 +476,8 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
       session = await page.context().newCDPSession(page)
       session.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => events.push(...data.value))
       await session.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' })
+      layerTreeCollector = new LayerTreeCollector(session)
+      await layerTreeCollector.start()
     }
     const interaction = async () => {
       stage = 'opening'
@@ -490,6 +496,7 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
     const openingMs = timings?.opening.milliseconds ?? (profiling ? null : undefined)
     const filteringMs = timings?.filtering.milliseconds ?? (profiling ? null : undefined)
     let render = null
+    layerTreeEvidence = traced ? layerTreeCollector!.captureAtEndpoint() : undefined
     let trace: string | null = null
     stage = 'trace summary'
     if (traced && session) {
@@ -498,11 +505,11 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
       await completed
       trace = `${editor}-${language}-${repeat + 1}.trace.json`
       await writeFile(join(output, trace), JSON.stringify(events))
-      render = summarizeInteractionTrace(events)
+      render = { ...summarizeInteractionTrace(events), compositedLayerCount: layerTreeEvidence!.compositedLayerCount }
     }
     const screenshot = `${editor}-${language}-${repeat + 1}-${traced ? 'render' : 'latency'}.png`
     await page.screenshot({ path: join(output, screenshot) })
-    return { editor, language, repeat, phase, status: 'passed', warmupRequests, openingMs: openingMs ?? null, filteringMs: filteringMs ?? null, observations: profiling && timings ? { opening: timings.opening, filtering: timings.filtering } : undefined, render, screenshot, trace, javascript: profileResult ? { frontendMs: profileResult.frontendMs, backendMs: profileResult.backendMs, totalMs: profileResult.totalMs, profiles: profileResult.profiles, coverage: profileResult.coverage, samplingIntervalMicroseconds: profileResult.samplingIntervalMicroseconds, captureStartedAt: profileResult.captureStartedAt, captureEndedAt: profileResult.captureEndedAt, captureBoundary: profileResult.captureBoundary } : undefined }
+    return { editor, language, repeat, phase, status: 'passed', warmupRequests, openingMs: openingMs ?? null, filteringMs: filteringMs ?? null, observations: profiling && timings ? { opening: timings.opening, filtering: timings.filtering } : undefined, render, layerTree: layerTreeEvidence, screenshot, trace, javascript: profileResult ? { frontendMs: profileResult.frontendMs, backendMs: profileResult.backendMs, totalMs: profileResult.totalMs, profiles: profileResult.profiles, coverage: profileResult.coverage, samplingIntervalMicroseconds: profileResult.samplingIntervalMicroseconds, captureStartedAt: profileResult.captureStartedAt, captureEndedAt: profileResult.captureEndedAt, captureBoundary: profileResult.captureBoundary } : undefined }
   } catch (error) {
     if (page) {
       const evidence = await page.evaluate(() => ({
@@ -515,8 +522,9 @@ async function measure(editor: EditorId, language: Language, repeat: number, pha
       await writeFile(`${prefix}-failure.json`, JSON.stringify({ stage, error: String(error), evidence }, null, 2)).catch(() => {})
       await page.screenshot({ path: `${prefix}-failure.png` }).catch(() => {})
     }
-    return { editor, language, repeat, phase, status: 'failed', openingMs: null, filteringMs: null, render: null, screenshot: null, trace: null, error: `${stage}: ${String(error)}` }
+    return { editor, language, repeat, phase, status: 'failed', openingMs: null, filteringMs: null, render: null, layerTree: layerTreeEvidence, screenshot: null, trace: null, error: `${stage}: ${String(error)}` }
   } finally {
+    await layerTreeCollector?.stop().catch(() => {})
     await session?.detach().catch(() => {})
     await app?.close().catch(() => {})
   }
